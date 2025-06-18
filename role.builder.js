@@ -77,7 +77,14 @@ const roleBuilder = {
      */
     performBuilding: function(creep) {
         // Use cached target if available
-        let target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
+        let target = null;
+        
+        // Special handling for controller targets
+        if (creep.memory.targetId === creep.room.controller.id) {
+            target = creep.room.controller;
+        } else {
+            target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
+        }
         
         // If target is gone or completed, find a new one
         if (!target || (target.progress !== undefined && target.progress === target.progressTotal)) {
@@ -107,8 +114,18 @@ const roleBuilder = {
                 };
             }
             
-            // Validate target before interacting
-            if (target && !target.id) {
+            // Special handling for controller targets
+            if (target.structureType === STRUCTURE_CONTROLLER) {
+                // Controllers are always valid if they're ours
+                if (!target.my) {
+                    console.log(`Builder ${creep.name} targeting non-owned controller, finding new target`);
+                    delete creep.memory.targetId;
+                    delete creep.memory.targetPos;
+                    return;
+                }
+            } 
+            // Validate other targets
+            else if (!target.id) {
                 console.log(`Builder ${creep.name} has invalid target, finding new target`);
                 delete creep.memory.targetId;
                 delete creep.memory.targetPos;
@@ -156,9 +173,18 @@ const roleBuilder = {
                         visualizePathStyle: {stroke: '#3333ff'}
                     });
                 } else if (actionResult === ERR_INVALID_TARGET) {
-                    console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target`);
-                    delete creep.memory.targetId;
-                    delete creep.memory.targetPos;
+                    // Track error count for this target
+                    creep.memory.errorCount = (creep.memory.errorCount || 0) + 1;
+                    
+                    console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target (error #${creep.memory.errorCount})`);
+                    
+                    // If we've had multiple errors with this target, do a full reset
+                    if (creep.memory.errorCount >= 3) {
+                        this.resetStuckBuilder(creep);
+                    } else {
+                        delete creep.memory.targetId;
+                        delete creep.memory.targetPos;
+                    }
                 } else if (actionResult !== OK) {
                     // Log errors other than distance
                     //console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
@@ -716,6 +742,32 @@ const roleBuilder = {
      * @param {Creep} creep - The creep to harvest with
      * @param {Object} source - The energy source
      */
+    /**
+     * Reset a stuck builder
+     * @param {Creep} creep - The creep to reset
+     */
+    resetStuckBuilder: function(creep) {
+        // Clear all target-related memory
+        delete creep.memory.targetId;
+        delete creep.memory.targetPos;
+        delete creep.memory.lastTargetSearch;
+        
+        // Force a new target search
+        const target = this.findBuildTarget(creep);
+        if (target) {
+            creep.memory.targetId = target.id;
+            creep.memory.targetPos = {
+                x: target.pos.x,
+                y: target.pos.y,
+                roomName: target.pos.roomName
+            };
+            console.log(`Reset stuck builder ${creep.name}, new target: ${target.id}`);
+        }
+        
+        // Reset error counter
+        creep.memory.errorCount = 0;
+    },
+    
     harvestEnergySource: function(creep, source) {
         creep.memory.energySourceId = source.id;
         

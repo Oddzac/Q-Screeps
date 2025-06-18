@@ -259,6 +259,38 @@ global.analyzeTraffic = function(roomName) {
     return output;
 };
 
+// Global function to fix stuck builders
+global.fixStuckBuilders = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const builders = _.filter(Game.creeps, c => 
+        c.memory.role === 'builder' && 
+        c.memory.homeRoom === roomName
+    );
+    
+    let fixed = 0;
+    
+    for (const builder of builders) {
+        // Check if this builder is stuck
+        if (builder.memory.targetId === room.controller.id) {
+            // Reset the builder
+            delete builder.memory.targetId;
+            delete builder.memory.targetPos;
+            delete builder.memory.lastTargetSearch;
+            delete builder.memory.errorCount;
+            
+            // Force a new target search on next tick
+            builder.say('🔄 Reset');
+            fixed++;
+        }
+    }
+    
+    return `Fixed ${fixed} stuck builders in room ${roomName}`;
+};
+
 // Global function to check builder/repairer status
 global.checkBuilders = function(roomName) {
     const room = Game.rooms[roomName];
