@@ -258,7 +258,7 @@ const roleUpgrader = {
                     visualizePathStyle: {stroke: '#ffaa00'}
                 });
             } else if (actionResult !== OK) {
-                console.log(`Upgrader ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
+                //console.log(`Upgrader ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
             }
         } else {
             // If no energy source found, move to controller area to wait

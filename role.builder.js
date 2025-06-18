@@ -27,7 +27,6 @@ const roleBuilder = {
             delete creep.memory.targetPos;
             // Register energy request when switching to harvesting
             this.registerEnergyRequest(creep);
-            console.log(`Builder ${creep.name} switching to harvesting mode`);
         }
         if (!creep.memory.building && creep.store.getFreeCapacity() === 0) {
             creep.memory.building = true;
@@ -38,7 +37,6 @@ const roleBuilder = {
             delete creep.memory.harvestingStarted; // Reset harvesting flag
             // Clear energy request when switching to building
             this.clearEnergyRequest(creep);
-            console.log(`Builder ${creep.name} switching to building mode`);
         }
         
         // Register energy request if below 25% capacity while building
@@ -144,7 +142,7 @@ const roleBuilder = {
                     delete creep.memory.targetPos;
                 } else if (actionResult !== OK) {
                     // Log errors other than distance
-                    console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
+                    //console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
                 }
             } catch (e) {
                 console.log(`Builder ${creep.name} exception: ${e} when interacting with target ${target.id}`);
@@ -572,7 +570,7 @@ const roleBuilder = {
             });
         } else if (actionResult !== OK) {
             // Log errors other than distance
-            console.log(`Builder ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
+            //console.log(`Builder ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
         }
     }
 };

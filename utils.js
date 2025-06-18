@@ -217,10 +217,19 @@ const utils = {
         // In emergency mode, only run critical operations
         if (global.emergencyMode) {
             let result;
+            // Check if we're in recovery mode (after pixel generation)
+            const isRecovery = global.emergencyMode.isRecovery === true;
+            
             if (global.emergencyMode.level === 'critical') {
-                result = priority === 'critical';
+                // In critical mode, only run critical tasks
+                // During recovery, also allow high priority tasks if bucket is above 400
+                result = priority === 'critical' || 
+                        (isRecovery && priority === 'high' && Game.cpu.bucket > 400);
             } else {
-                result = ['critical', 'high'].includes(priority);
+                // In high emergency mode, run critical and high priority tasks
+                // During recovery, also allow medium priority tasks if bucket is above 1000
+                result = ['critical', 'high'].includes(priority) || 
+                        (isRecovery && priority === 'medium' && Game.cpu.bucket > 1000);
             }
             this.cache[cacheKey] = result;
             return result;
@@ -230,10 +239,23 @@ const utils = {
         const bucket = Game.cpu.bucket;
         let result;
         
-        if (bucket < 1000) result = priority === 'critical';
-        else if (bucket < 3000) result = ['critical', 'high'].includes(priority);
-        else if (bucket < 7000) result = !['low'].includes(priority);
-        else result = true; // Full bucket, run everything
+        // Check if we're in post-pixel recovery period (but not in emergency mode)
+        const inRecoveryPeriod = global.lastPixelGeneration && 
+                                (Game.time - global.lastPixelGeneration < 1000);
+        
+        if (inRecoveryPeriod) {
+            // More lenient thresholds during recovery period
+            if (bucket < 500) result = priority === 'critical';
+            else if (bucket < 2000) result = ['critical', 'high'].includes(priority);
+            else if (bucket < 5000) result = !['low'].includes(priority);
+            else result = true;
+        } else {
+            // Standard thresholds
+            if (bucket < 1000) result = priority === 'critical';
+            else if (bucket < 3000) result = ['critical', 'high'].includes(priority);
+            else if (bucket < 7000) result = !['low'].includes(priority);
+            else result = true; // Full bucket, run everything
+        }
         
         this.cache[cacheKey] = result;
         return result;

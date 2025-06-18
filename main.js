@@ -143,6 +143,26 @@ global.toggleTrafficVisualization = function() {
     }
 };
 
+// Global function to check CPU recovery status
+global.checkRecovery = function() {
+    const inRecoveryPeriod = global.lastPixelGeneration && 
+                           (Game.time - global.lastPixelGeneration < 1000);
+    const timeSincePixel = global.lastPixelGeneration ? 
+                          Game.time - global.lastPixelGeneration : 'never';
+    
+    return {
+        lastPixelGeneration: global.lastPixelGeneration || 'never',
+        timeSincePixel: timeSincePixel,
+        inRecoveryPeriod: inRecoveryPeriod,
+        currentBucket: Game.cpu.bucket,
+        emergencyMode: global.emergencyMode ? {
+            level: global.emergencyMode.level,
+            isRecovery: global.emergencyMode.isRecovery,
+            duration: Game.time - global.emergencyMode.startTime
+        } : 'off'
+    };
+};
+
 // Global function to analyze traffic in a room
 global.analyzeTraffic = function(roomName) {
     const room = Game.rooms[roomName];
@@ -627,19 +647,45 @@ module.exports.loop = function() {
     // Calculate average CPU usage over last 10 ticks
     const avgCpuUsage = global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length;
     
+    // Track if we recently generated a pixel
+    if (!global.lastPixelGeneration) global.lastPixelGeneration = 0;
+    
+    // Check if pixel was just generated (bucket dropped from 10000)
+    if (Game.cpu.bucket < 9000 && global.previousBucket === 10000) {
+        global.lastPixelGeneration = Game.time;
+        console.log(`Pixel generation detected at tick ${Game.time}`);
+    }
+    
+    // Store current bucket for next tick comparison
+    global.previousBucket = Game.cpu.bucket;
+    
+    // Calculate time since last pixel generation
+    const timeSincePixel = Game.time - global.lastPixelGeneration;
+    
     // Enter emergency mode if CPU usage is consistently high or bucket is critically low
-    if (avgCpuUsage > 0.9 || Game.cpu.bucket < 1000) {
+    // Use more lenient thresholds right after pixel generation
+    const inRecoveryPeriod = timeSincePixel < 1000; // Recovery period of 1000 ticks after pixel generation
+    const bucketThreshold = inRecoveryPeriod ? 500 : 1000; // More lenient threshold during recovery
+    
+    if (avgCpuUsage > 0.9 || Game.cpu.bucket < bucketThreshold) {
         if (!global.emergencyMode) {
             global.emergencyMode = {
                 active: true,
                 startTime: Game.time,
-                level: Game.cpu.bucket < 500 ? 'critical' : 'high'
+                level: Game.cpu.bucket < 300 ? 'critical' : 'high',
+                isRecovery: inRecoveryPeriod
             };
-            console.log(`⚠️ ENTERING EMERGENCY CPU MODE (${global.emergencyMode.level}): CPU usage ${(avgCpuUsage*100).toFixed(1)}%, bucket ${Game.cpu.bucket}`);
+            console.log(`⚠️ ENTERING ${inRecoveryPeriod ? 'RECOVERY' : 'EMERGENCY'} CPU MODE (${global.emergencyMode.level}): CPU usage ${(avgCpuUsage*100).toFixed(1)}%, bucket ${Game.cpu.bucket}`);
         }
-    } else if (global.emergencyMode && (avgCpuUsage < 0.7 && Game.cpu.bucket > 3000)) {
-        console.log(`✓ Exiting emergency CPU mode after ${Game.time - global.emergencyMode.startTime} ticks`);
-        global.emergencyMode = null;
+    } else if (global.emergencyMode) {
+        // Exit conditions - more lenient during recovery period
+        const exitBucketThreshold = inRecoveryPeriod ? 2000 : 3000;
+        const exitCpuThreshold = inRecoveryPeriod ? 0.8 : 0.7;
+        
+        if (avgCpuUsage < exitCpuThreshold && Game.cpu.bucket > exitBucketThreshold) {
+            console.log(`✓ Exiting ${global.emergencyMode.isRecovery ? 'recovery' : 'emergency'} CPU mode after ${Game.time - global.emergencyMode.startTime} ticks`);
+            global.emergencyMode = null;
+        }
     }
     
     // Log performance stats every 100 ticks
