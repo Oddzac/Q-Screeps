@@ -626,17 +626,72 @@ const roomManager = {
         // Count important structures
         const containers = room.find(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER
-        }).length;
+        });
+        
+        // Separate source containers from controller containers
+        const sourceContainers = containers.filter(c => 
+            room.find(FIND_SOURCES, {
+                filter: source => source.pos.inRangeTo(c, 2)
+            }).length > 0
+        ).length;
+        
+        const controllerContainers = containers.filter(c => 
+            c.pos.inRangeTo(room.controller, 3)
+        ).length;
         
         const storage = room.storage ? 1 : 0;
         
-        // Calculate approximate energy production per tick
-        const energyPerTick = sourceCount * 10; // Approximate energy per tick
+        // Calculate energy transport needs
+        // Base energy production: 10 energy per source per tick
+        const energyPerTick = sourceCount * 10;
+        
+        // Calculate transport distance factor
+        // Longer distances between sources and destinations require more haulers
+        let distanceFactor = 1.0;
+        
+        // If we have sources and spawns, calculate average distance
+        const sources = room.find(FIND_SOURCES);
+        const spawns = room.find(FIND_MY_SPAWNS);
+        
+        if (sources.length > 0 && spawns.length > 0) {
+            let totalDistance = 0;
+            let pathCount = 0;
+            
+            for (const source of sources) {
+                for (const spawn of spawns) {
+                    // Use simple Manhattan distance as approximation
+                    const distance = Math.abs(source.pos.x - spawn.pos.x) + 
+                                    Math.abs(source.pos.y - spawn.pos.y);
+                    totalDistance += distance;
+                    pathCount++;
+                }
+            }
+            
+            // Average distance affects hauler needs
+            if (pathCount > 0) {
+                const avgDistance = totalDistance / pathCount;
+                // Longer distances need more haulers
+                distanceFactor = Math.max(1.0, avgDistance / 15); // Normalize to 1.0 at distance 15
+            }
+        }
+        
+        // Calculate hauler count based on multiple factors
+        // 1. Energy production (base factor)
+        // 2. Distance between sources and destinations
+        // 3. Infrastructure (containers, storage)
+        // 4. RCL (higher RCL = more structures to fill)
+        
+        const haulerBase = Math.ceil(energyPerTick / 50); // Base on energy production
+        const haulerDistance = Math.ceil(haulerBase * distanceFactor); // Adjust for distance
+        const haulerInfra = sourceCount + storage + Math.min(1, controllerContainers); // Infrastructure factor
+        
+        // RCL factor - higher RCL means more structures to fill
+        const rclFactor = rcl <= 2 ? 1.0 : (rcl <= 4 ? 1.2 : 1.5);
         
         // Calculate optimal creep counts based on infrastructure
         const result = {
             harvester: Math.min(sourceCount*2, 4), // Allow up to 4 harvesters for rooms with multiple sources
-            hauler: Math.min(Math.ceil(energyPerTick / 50), sourceCount + storage + 1), // Scale with energy production
+            hauler: Math.min(Math.max(haulerDistance, haulerInfra) * rclFactor, 6), // Cap at 6 haulers
             upgrader: rcl < 8 ? Math.min(rcl <= 3 ? 1 : 2, 2) : 1, // 1-2 based on RCL
             builder: 0, // Will be calculated based on construction needs
             total: 0
