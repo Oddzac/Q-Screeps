@@ -1007,6 +1007,11 @@ const constructionManagerImpl = {
             room.memory.construction.lastNonRoadTick = Game.time;
         }
         
+        // Track the last structure type we attempted to place
+        if (!room.memory.construction.lastStructureType) {
+            room.memory.construction.lastStructureType = 'containers';
+        }
+        
         // Initialize tracking for sites placed by type
         let sitesPlacedForRoads = 0;
         let sitesPlacedForContainers = 0;
@@ -1017,10 +1022,17 @@ const constructionManagerImpl = {
         // If we haven't placed a non-road structure in 100 ticks, force non-road priority
         const forceNonRoads = Game.time - (room.memory.construction.lastNonRoadTick || 0) > 100;
         
-        // Determine structure order
-        const structureOrder = prioritizeNonRoads || forceNonRoads ? 
+        // Define the base structure order
+        const baseStructureOrder = prioritizeNonRoads || forceNonRoads ? 
             ['containers', 'extensions', 'towers', 'storage', 'roads'] : 
             ['containers', 'extensions', 'roads', 'towers', 'storage'];
+            
+        // Rotate the structure order to start with the next type after the last one we tried
+        // This ensures we cycle through all structure types even if one type is stuck
+        const lastIndex = baseStructureOrder.indexOf(room.memory.construction.lastStructureType);
+        const structureOrder = lastIndex >= 0 ? 
+            [...baseStructureOrder.slice(lastIndex + 1), ...baseStructureOrder.slice(0, lastIndex + 1)] :
+            baseStructureOrder;
             
         // Log construction plan if forced or periodically
         if (forceNonRoads || Game.time % 100 === 0) {
@@ -1028,9 +1040,17 @@ const constructionManagerImpl = {
         }
             
         // Process each structure type in order
-        for (const structureType of structureOrder) {
-            // Skip if we've placed enough sites
-            if (sitesPlaced >= sitesToPlace) break;
+        let structureIndex = 0;
+        while (structureIndex < structureOrder.length && sitesPlaced < sitesToPlace) {
+            const structureType = structureOrder[structureIndex];
+            let sitesPreviouslyPlaced = sitesPlaced;
+            
+            // Track sites placed before attempting this structure type
+            const previousRoadSites = sitesPlacedForRoads;
+            const previousContainerSites = sitesPlacedForContainers;
+            const previousExtensionSites = sitesPlacedForExtensions;
+            const previousTowerSites = sitesPlacedForTowers;
+            const previousStorageSites = sitesPlacedForStorage;
             
             // Create container construction sites
             if (structureType === 'containers' && 
@@ -1073,6 +1093,18 @@ const constructionManagerImpl = {
                 
                 // Update container positions in memory
                 room.memory.construction.containers.positions = newContainerPositions;
+                
+                // Check if we placed any sites for this structure type
+                if (sitesPlacedForContainers === previousContainerSites) {
+                    // No sites placed, move to next structure type
+                    structureIndex++;
+                } else {
+                    // Sites were placed, continue with this structure type
+                    continue;
+                }
+            } else {
+                // Structure type not applicable, move to next
+                structureIndex++;
             }
             
             // Create extension construction sites
@@ -1126,6 +1158,12 @@ const constructionManagerImpl = {
                     
                     // Update extension positions in memory
                     room.memory.construction.extensions.positions = newExtensionPositions;
+                    
+                    // Check if we placed any extension sites
+                    if (sitesPlacedForExtensions === previousExtensionSites) {
+                        // No extension sites placed, move to next structure type
+                        structureIndex++;
+                    }
                 }
             }
             
@@ -1258,8 +1296,11 @@ const constructionManagerImpl = {
             // Update road positions in memory
             room.memory.construction.roads.positions = newRoadPositions;
             
-            // If we placed some road sites but haven't reached our target,
-            // we'll continue with other structure types
+            // Check if we placed any road sites
+            if (sitesPlacedForRoads === previousRoadSites) {
+                // No road sites placed, move to next structure type
+                structureIndex++;
+            }
         }
         
         // Extensions are now created before roads
@@ -1312,6 +1353,12 @@ const constructionManagerImpl = {
                     
                     // Update tower positions in memory
                     room.memory.construction.towers.positions = newTowerPositions;
+                    
+                    // Check if we placed any tower sites
+                    if (sitesPlacedForTowers === previousTowerSites) {
+                        // No tower sites placed, move to next structure type
+                        structureIndex++;
+                    }
                 }
             }
             
@@ -1342,6 +1389,12 @@ const constructionManagerImpl = {
                         room.memory.construction.lastNonRoadTick = Game.time;
                     }
                 }
+                
+                // Check if we placed any storage sites
+                if (sitesPlacedForStorage === previousStorageSites) {
+                    // No storage sites placed, move to next structure type
+                    structureIndex++;
+                }
             }
         }
         
@@ -1349,6 +1402,11 @@ const constructionManagerImpl = {
         const updatedSites = room.find(FIND_CONSTRUCTION_SITES);
         room.memory.constructionSites = updatedSites.length;
         room.memory.constructionSiteIds = updatedSites.map(site => site.id);
+        
+        // Update the last attempted structure type
+        if (structureOrder.length > 0) {
+            room.memory.construction.lastStructureType = structureOrder[0];
+        }
         
         // Calculate total non-road sites placed
         const nonRoadSitesPlaced = sitesPlacedForContainers + sitesPlacedForExtensions + 
