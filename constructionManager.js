@@ -53,18 +53,6 @@ const constructionManagerImpl = {
         // Check if room has evolved and needs plan updates
         this.checkRoomEvolution(room);
         
-        // Initialize construction memory if needed
-        if (!room.memory.construction) {
-            room.memory.construction = {
-                roads: { planned: false },
-                extensions: { planned: false, count: 0 },
-                containers: { planned: false },
-                storage: { planned: false },
-                towers: { planned: false, count: 0 },
-                lastUpdate: 0
-            };
-        }
-        
         // Ensure all required construction memory properties exist
         if (!room.memory.construction.roads) room.memory.construction.roads = { planned: false };
         if (!room.memory.construction.extensions) room.memory.construction.extensions = { planned: false, count: 0 };
@@ -1108,7 +1096,7 @@ const constructionManagerImpl = {
             }
             
             // Create extension construction sites
-            else if (structureType === 'extensions' && 
+            if (structureType === 'extensions' && 
                 room.controller.level >= 2 && room.memory.construction && 
                 room.memory.construction.extensions && 
                 room.memory.construction.extensions.planned && 
@@ -1168,9 +1156,9 @@ const constructionManagerImpl = {
             }
             
             // Create road construction sites
-        if (room.memory.construction && room.memory.construction.roads && 
-            room.memory.construction.roads.planned && 
-            room.memory.construction.roads.positions && sitesPlaced < sitesToPlace) {
+            if (structureType === 'roads' && room.memory.construction && 
+                room.memory.construction.roads && room.memory.construction.roads.planned && 
+                room.memory.construction.roads.positions && sitesPlaced < sitesToPlace) {
             
             const roadPositions = room.memory.construction.roads.positions;
             let newRoadPositions = [];
@@ -1303,10 +1291,10 @@ const constructionManagerImpl = {
             }
         }
         
-        // Extensions are now created before roads
+
         
             // Create tower construction sites
-            else if (structureType === 'towers' && 
+            if (structureType === 'towers' && 
                 room.controller.level >= 3 && room.memory.construction && 
                 room.memory.construction.towers && 
                 room.memory.construction.towers.planned && 
@@ -1363,7 +1351,7 @@ const constructionManagerImpl = {
             }
             
             // Create storage construction site
-            else if (structureType === 'storage' && 
+            if (structureType === 'storage' && 
                 room.controller.level >= 4 && room.memory.construction && 
                 room.memory.construction.storage && 
                 room.memory.construction.storage.planned && 
