@@ -440,14 +440,14 @@ module.exports.loop = function() {
         const roomOffset = roomHash % 5; // Distribute across 5 ticks
         
         // Handle spawning logic - throttle based on available CPU and distribute by room
-        if (Game.cpu.bucket > 3000 || (currentTick + roomOffset) % 3 === 0) {
+        if (Game.cpu.bucket > 1000 || (currentTick + roomOffset) % 3 === 0) {
             const spawnStart = Game.cpu.getUsed();
             spawnManager.run(room);
             global.stats.cpu.spawning += Game.cpu.getUsed() - spawnStart;
         }
         
         // Handle construction planning - run periodically and distribute by room
-        if (Game.cpu.bucket > 3000 || (currentTick + roomOffset) % 10 === 0) {
+        if (Game.cpu.bucket > 1000 || (currentTick + roomOffset) % 5 === 0) {
             const constructionStart = Game.cpu.getUsed();
             try {
                 constructionManager.run(room);
