@@ -108,6 +108,73 @@ global.planConstruction = function(roomName) {
     return `Construction planning triggered for room ${roomName}`;
 };
 
+// Global function to set creep limits for a room
+global.setCreepLimits = function(roomName, role, limit) {
+    if (!Memory.rooms[roomName]) {
+        return `Room ${roomName} not found in memory`;
+    }
+    
+    if (!Memory.rooms[roomName].creepLimits) {
+        Memory.rooms[roomName].creepLimits = {};
+    }
+    
+    // Validate role
+    const validRoles = ['harvester', 'hauler', 'upgrader', 'builder', 'total'];
+    if (!validRoles.includes(role)) {
+        return `Invalid role. Must be one of: ${validRoles.join(', ')}`;
+    }
+    
+    // Set the limit
+    Memory.rooms[roomName].creepLimits[role] = limit;
+    console.log(`Set ${role} limit for room ${roomName} to ${limit}`);
+    
+    return `Set ${role} limit for room ${roomName} to ${limit}`;
+};
+
+// Global function to show creep counts and limits
+global.showCreeps = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `Room ${roomName} not found or not visible`;
+    }
+    
+    const roomManager = require('roomManager');
+    
+    // Get current counts
+    const counts = roomManager.getRoomData(roomName, 'creepCounts') || {
+        harvester: 0,
+        hauler: 0,
+        upgrader: 0,
+        builder: 0,
+        total: 0
+    };
+    
+    // Get recommended limits
+    let limits;
+    const cacheKey = `roomNeeds_${roomName}`;
+    if (roomManager.cache[cacheKey] && Game.time - roomManager.cache[cacheKey].time < 20) {
+        limits = roomManager.cache[cacheKey].value;
+    } else {
+        limits = roomManager.analyzeRoomNeeds(room);
+    }
+    
+    // Get manual limits
+    const manualLimits = room.memory.creepLimits || {};
+    
+    // Format output
+    let output = `Creep Status for Room ${roomName} (RCL ${room.controller.level}):\n`;
+    output += `Role       | Current | Auto Limit | Manual Limit\n`;
+    output += `-----------|---------|-----------|-------------\n`;
+    output += `Harvester  | ${counts.harvester.toString().padEnd(7)} | ${limits.harvester.toString().padEnd(9)} | ${(manualLimits.harvester !== undefined ? manualLimits.harvester : '-').toString().padEnd(11)}\n`;
+    output += `Hauler     | ${counts.hauler.toString().padEnd(7)} | ${limits.hauler.toString().padEnd(9)} | ${(manualLimits.hauler !== undefined ? manualLimits.hauler : '-').toString().padEnd(11)}\n`;
+    output += `Upgrader   | ${counts.upgrader.toString().padEnd(7)} | ${limits.upgrader.toString().padEnd(9)} | ${(manualLimits.upgrader !== undefined ? manualLimits.upgrader : '-').toString().padEnd(11)}\n`;
+    output += `Builder    | ${counts.builder.toString().padEnd(7)} | ${limits.builder.toString().padEnd(9)} | ${(manualLimits.builder !== undefined ? manualLimits.builder : '-').toString().padEnd(11)}\n`;
+    output += `-----------|---------|-----------|-------------\n`;
+    output += `Total      | ${counts.total.toString().padEnd(7)} | ${limits.total.toString().padEnd(9)} | ${(manualLimits.total !== undefined ? manualLimits.total : '-').toString().padEnd(11)}\n`;
+    
+    return output;
+};
+
 // Force construction site creation
 global.forceConstruction = function(roomName) {
     const room = Game.rooms[roomName];

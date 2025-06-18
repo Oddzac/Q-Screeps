@@ -513,6 +513,74 @@ const roomManager = {
                 }
             }
         }
+    },
+    
+    /**
+     * Analyze room infrastructure to determine optimal creep counts
+     * @param {Room} room - The room to analyze
+     * @returns {Object} - Recommended creep counts
+     */
+    analyzeRoomNeeds: function(room) {
+        if (!room || !room.controller) return null;
+        
+        const rcl = room.controller.level;
+        const sourceCount = Object.keys(room.memory.sources || {}).length || 1;
+        
+        // Count important structures
+        const containers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER
+        }).length;
+        
+        const storage = room.storage ? 1 : 0;
+        
+        // Calculate optimal creep counts based on infrastructure
+        const result = {
+            harvester: Math.min(sourceCount, 2), // Max 1 per source, but at least 2 total
+            hauler: Math.min(Math.max(1, containers), sourceCount + storage),
+            upgrader: rcl < 8 ? Math.min(rcl <= 3 ? 1 : 2, 2) : 1, // 1-2 based on RCL
+            builder: 0, // Will be calculated based on construction needs
+            total: 0
+        };
+        
+        // Adjust builder count based on construction sites
+        const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
+        result.builder = constructionSites > 0 ? Math.min(2, Math.ceil(constructionSites / 5)) : 0;
+        
+        // Apply manual limits if set
+        if (room.memory.creepLimits) {
+            if (room.memory.creepLimits.harvester !== undefined) {
+                result.harvester = room.memory.creepLimits.harvester;
+            }
+            if (room.memory.creepLimits.hauler !== undefined) {
+                result.hauler = room.memory.creepLimits.hauler;
+            }
+            if (room.memory.creepLimits.upgrader !== undefined) {
+                result.upgrader = room.memory.creepLimits.upgrader;
+            }
+            if (room.memory.creepLimits.builder !== undefined) {
+                result.builder = room.memory.creepLimits.builder;
+            }
+        }
+        
+        // Calculate total
+        result.total = result.harvester + result.hauler + result.upgrader + result.builder;
+        
+        // Apply manual total limit if set
+        if (room.memory.creepLimits && room.memory.creepLimits.total !== undefined) {
+            result.total = Math.min(result.total, room.memory.creepLimits.total);
+        } else {
+            // Default total limit based on RCL
+            const defaultTotal = rcl <= 2 ? 6 : (rcl <= 4 ? 8 : 10);
+            result.total = Math.min(result.total, defaultTotal);
+        }
+        
+        // Cache the result
+        this.cache[`roomNeeds_${room.name}`] = {
+            time: Game.time,
+            value: result
+        };
+        
+        return result;
     }
 };
 

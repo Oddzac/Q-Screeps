@@ -95,6 +95,18 @@ const spawnManager = {
      * @returns {string|null} - The role to spawn or null if none needed
      */
     getNeededRole: function(room, counts) {
+        // Use roomManager's analysis for optimal creep counts
+        let optimalCounts;
+        const cacheKey = `roomNeeds_${room.name}`;
+        
+        if (roomManager.cache[cacheKey] && Game.time - roomManager.cache[cacheKey].time < 20) {
+            // Use cached analysis if recent
+            optimalCounts = roomManager.cache[cacheKey].value;
+        } else {
+            // Get fresh analysis
+            optimalCounts = roomManager.analyzeRoomNeeds(room);
+        }
+        
         // Get source count from room memory
         const sourceCount = Object.keys(room.memory.sources || {}).length || 1;
         
@@ -105,42 +117,32 @@ const spawnManager = {
         // Calculate RCL-based values
         const rcl = room.controller.level;
         
-        // Calculate work units needed
-        const harvestWorkNeeded = sourceCount * 5; // Each source can support ~5 WORK parts
-        const constructionWorkNeeded = Math.min(8, constructionSites * 1.5); // Increased priority for construction
-        const repairWorkNeeded = Math.min(3, repairTargets); // Slightly increased repair priority
-        const upgradeWorkNeeded = rcl <= 2 ? 2 : (rcl >= 4 ? 4 : 3); // Scale upgraders with RCL
+        // Use optimal counts from room analysis, with fallbacks
+        const maxHarvesters = optimalCounts ? optimalCounts.harvester : Math.min(sourceCount, 2);
+        const maxHaulers = optimalCounts ? optimalCounts.hauler : Math.min(sourceCount + 1, 2);
+        const maxUpgraders = optimalCounts ? optimalCounts.upgrader : Math.min(2, rcl <= 2 ? 1 : 2);
+        const maxBuilders = optimalCounts ? optimalCounts.builder : (constructionSites > 0 ? Math.min(2, Math.ceil(constructionSites / 5)) : 0);
         
-        // Calculate carry units needed
-        const carryUnitsNeeded = sourceCount * 4; // Each source needs ~4 CARRY parts of transport
+        // Minimum requirements
+        const minHarvesters = Math.min(maxHarvesters, 1); // At least 1 harvester
+        const minHaulers = maxHarvesters > 0 ? Math.min(maxHaulers, 1) : 0; // At least 1 hauler if we have harvesters
+        const minUpgraders = Math.min(maxUpgraders, 1); // At least 1 upgrader
+        const minBuilders = constructionSites > 0 ? Math.min(maxBuilders, 1) : 0; // At least 1 builder if construction exists
         
-        // Calculate actual work units available
-        const harvesterWorkUnits = counts.harvester * 2; // Assume 2 WORK parts per harvester
-        const builderWorkUnits = counts.builder * 1; // Assume 1 WORK part per builder
-        const upgraderWorkUnits = counts.upgrader * 1; // Assume 1 WORK part per upgrader
-        const haulerCarryUnits = counts.hauler * 4; // Assume 4 CARRY parts per hauler
+        // Total creep cap based on RCL - strict limits
+        const maxTotalCreeps = optimalCounts ? optimalCounts.total : (rcl <= 2 ? 6 : (rcl <= 4 ? 8 : 10));
         
-        // Calculate minimum creeps needed based on work units
-        const minHarvesters = Math.ceil(Math.min(harvestWorkNeeded, 10) / 2); // Each harvester has ~2 WORK parts
-        const minHaulers = Math.ceil(carryUnitsNeeded / 4); // Each hauler has ~4 CARRY parts
-        const minUpgraders = 1; // Always need at least one upgrader
-        const minBuilders = constructionSites > 0 ? 1 : 0; // Only need builders if there's construction
-        
-        // Calculate maximum creeps based on RCL and needs
-        const maxHarvesters = Math.ceil(harvestWorkNeeded / 2);
-        const maxHaulers = Math.ceil(carryUnitsNeeded / 3);
-        const maxUpgraders = Math.ceil(upgradeWorkNeeded / 1);
-        // Ensure we have enough builders when construction sites exist
-        const maxBuilders = constructionSites > 0 ? 
-            Math.max(2, Math.ceil((constructionWorkNeeded + repairWorkNeeded) / 1)) : 
-            Math.ceil((constructionWorkNeeded + repairWorkNeeded) / 1);
-        
-        // Total creep cap based on RCL
-        const maxTotalCreeps = rcl <= 2 ? 10 : 15;
-        
-        // Check if we're at total creep capacity
+        // Check if we're at total creep capacity - enforce strict limit
         if (counts.total >= maxTotalCreeps) {
+            console.log(`Room ${room.name} at max creep capacity (${counts.total}/${maxTotalCreeps})`);
             return null;
+        }
+        
+        // Log current creep counts for monitoring
+        if (Game.time % 100 === 0) {
+            console.log(`Room ${room.name} creep counts: H:${counts.harvester}/${maxHarvesters}, ` +
+                `Ha:${counts.hauler}/${maxHaulers}, U:${counts.upgrader}/${maxUpgraders}, ` +
+                `B:${counts.builder}/${maxBuilders}, Total:${counts.total}/${maxTotalCreeps}`);
         }
         
         // Check minimum requirements in priority order
@@ -148,6 +150,20 @@ const spawnManager = {
         if (counts.hauler < minHaulers) return 'hauler';
         if (counts.upgrader < minUpgraders) return 'upgrader';
         if (counts.builder < minBuilders) return 'builder';
+        
+        // Enforce strict role caps - don't spawn more than max for each role
+        if (counts.harvester >= maxHarvesters) {
+            console.log(`Room ${room.name} at max harvesters (${counts.harvester}/${maxHarvesters})`);
+        }
+        if (counts.hauler >= maxHaulers) {
+            console.log(`Room ${room.name} at max haulers (${counts.hauler}/${maxHaulers})`);
+        }
+        if (counts.upgrader >= maxUpgraders) {
+            console.log(`Room ${room.name} at max upgraders (${counts.upgrader}/${maxUpgraders})`);
+        }
+        if (counts.builder >= maxBuilders) {
+            console.log(`Room ${room.name} at max builders (${counts.builder}/${maxBuilders})`);
+        }
         
         // Don't spawn more than max for each role
         if (counts.harvester >= maxHarvesters && 
@@ -157,13 +173,21 @@ const spawnManager = {
             return null;
         }
         
-        // Calculate work deficits
-        const harvesterDeficit = harvestWorkNeeded - harvesterWorkUnits;
-        const builderDeficit = (constructionWorkNeeded + repairWorkNeeded) - builderWorkUnits;
-        const upgraderDeficit = upgradeWorkNeeded - upgraderWorkUnits;
-        const haulerDeficit = carryUnitsNeeded - haulerCarryUnits;
+        // Calculate percentage deficits rather than absolute numbers
+        // This gives more balanced priorities
+        const harvesterDeficit = maxHarvesters > 0 ? 
+            ((maxHarvesters - counts.harvester) / maxHarvesters) * 100 : 0;
         
-        // Create a priority queue based on deficits
+        const haulerDeficit = maxHaulers > 0 ? 
+            ((maxHaulers - counts.hauler) / maxHaulers) * 100 : 0;
+        
+        const upgraderDeficit = maxUpgraders > 0 ? 
+            ((maxUpgraders - counts.upgrader) / maxUpgraders) * 100 : 0;
+        
+        const builderDeficit = maxBuilders > 0 ? 
+            ((maxBuilders - counts.builder) / maxBuilders) * 100 : 0;
+        
+        // Create a priority queue based on percentage deficits
         const priorities = [
             { role: 'harvester', deficit: harvesterDeficit, max: maxHarvesters, current: counts.harvester },
             { role: 'hauler', deficit: haulerDeficit, max: maxHaulers, current: counts.hauler },
@@ -173,15 +197,25 @@ const spawnManager = {
         
         // Apply priority modifiers based on RCL and construction needs
         for (const priority of priorities) {
-            // Boost builder priority when we have construction sites
+            // Critical roles get priority boosts
+            if (priority.role === 'harvester') {
+                priority.deficit *= 1.5; // Harvesters are most important
+            }
+            
+            if (priority.role === 'hauler' && counts.harvester > 0) {
+                priority.deficit *= 1.3; // Haulers are important once we have harvesters
+            }
+            
+            // Boost builder priority when we have construction sites for critical structures
             if (priority.role === 'builder' && constructionSites > 0) {
-                // Higher boost for more construction sites
-                const boost = Math.min(5, constructionSites);
-                priority.deficit += boost;
+                // Check if we have extensions or containers being built (critical infrastructure)
+                const criticalSites = room.find(FIND_CONSTRUCTION_SITES, {
+                    filter: site => site.structureType === STRUCTURE_EXTENSION || 
+                                   site.structureType === STRUCTURE_CONTAINER
+                }).length;
                 
-                // Extra boost for early RCL when extensions and containers are critical
-                if (rcl <= 3) {
-                    priority.deficit += 2;
+                if (criticalSites > 0 && rcl <= 3) {
+                    priority.deficit *= 1.4; // Critical infrastructure at low RCL
                 }
             }
             
@@ -189,11 +223,11 @@ const spawnManager = {
             if (priority.role === 'upgrader') {
                 // Lower upgrader priority when we have construction sites at low RCL
                 if (constructionSites > 0 && rcl <= 3) {
-                    priority.deficit -= 2;
+                    priority.deficit *= 0.7;
                 }
                 // Boost upgrader priority at RCL 7 to reach RCL 8 faster
                 else if (rcl === 7) {
-                    priority.deficit += 3;
+                    priority.deficit *= 1.2;
                 }
             }
         }
