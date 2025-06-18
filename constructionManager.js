@@ -117,7 +117,7 @@ const constructionManagerImpl = {
             console.log(`Construction status for ${room.name}: ` +
                 `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
                 `Extensions: ${room.memory.construction.extensions.planned ? 'Planned' : 'Not Planned'}, ` +
-                `Containers: ${room.memory.construction.containers?.planned ? 'Planned' : 'Not Planned'}, ` +
+                `Containers: ${room.memory.construction.containers && room.memory.construction.containers.planned ? 'Planned' : 'Not Planned'}, ` +
                 `RCL: ${room.controller.level}`
             );
             
