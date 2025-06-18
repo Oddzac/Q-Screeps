@@ -155,16 +155,16 @@ const spawnManager = {
         
         // Enforce strict role caps - don't spawn more than max for each role
         if (counts.harvester >= maxHarvesters) {
-            console.log(`Room ${room.name} at max harvesters (${counts.harvester}/${maxHarvesters})`);
+            //console.log(`Room ${room.name} at max harvesters (${counts.harvester}/${maxHarvesters})`);
         }
         if (counts.hauler >= maxHaulers) {
-            console.log(`Room ${room.name} at max haulers (${counts.hauler}/${maxHaulers})`);
+            //console.log(`Room ${room.name} at max haulers (${counts.hauler}/${maxHaulers})`);
         }
         if (counts.upgrader >= maxUpgraders) {
-            console.log(`Room ${room.name} at max upgraders (${counts.upgrader}/${maxUpgraders})`);
+            //console.log(`Room ${room.name} at max upgraders (${counts.upgrader}/${maxUpgraders})`);
         }
         if (counts.builder >= maxBuilders) {
-            console.log(`Room ${room.name} at max builders (${counts.builder}/${maxBuilders})`);
+            //console.log(`Room ${room.name} at max builders (${counts.builder}/${maxBuilders})`);
         }
         
         // Don't spawn more than max for each role
