@@ -143,6 +143,59 @@ global.toggleTrafficVisualization = function() {
     }
 };
 
+// Global function to analyze traffic in a room
+global.analyzeTraffic = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const creeps = room.find(FIND_MY_CREEPS);
+    const creepsByRole = _.groupBy(creeps, c => c.memory.role);
+    
+    let output = `Traffic Analysis for Room ${roomName}:\n`;
+    output += `Total creeps: ${creeps.length}\n`;
+    
+    // Count creeps by role
+    for (const role in creepsByRole) {
+        output += `${role}: ${creepsByRole[role].length}\n`;
+    }
+    
+    // Find traffic hotspots
+    const positions = {};
+    for (const creep of creeps) {
+        const key = `${creep.pos.x},${creep.pos.y}`;
+        positions[key] = (positions[key] || 0) + 1;
+    }
+    
+    // Find positions with multiple creeps
+    const hotspots = Object.entries(positions)
+        .filter(([_, count]) => count > 1)
+        .sort(([_, countA], [__, countB]) => countB - countA);
+    
+    if (hotspots.length > 0) {
+        output += `\nTraffic hotspots:\n`;
+        for (const [pos, count] of hotspots) {
+            const [x, y] = pos.split(',');
+            output += `Position (${x},${y}): ${count} creeps\n`;
+            
+            // Visualize hotspots
+            room.visual.circle(parseInt(x), parseInt(y), {
+                radius: 0.5,
+                fill: 'red',
+                opacity: 0.7
+            });
+        }
+    } else {
+        output += `\nNo traffic hotspots detected.`;
+    }
+    
+    // Enable traffic visualization
+    Memory.visualizeTraffic = true;
+    
+    return output;
+};
+
 // Global function to show creep counts and limits
 global.showCreeps = function(roomName) {
     const room = Game.rooms[roomName];

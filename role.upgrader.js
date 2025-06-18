@@ -2,12 +2,17 @@
  * Upgrader Role - Controller upgrading
  * CPU optimized for maximum efficiency
  */
+const movementManager = require('movementManager');
+
 const roleUpgrader = {
     /**
      * Run the upgrader role
      * @param {Creep} creep - The creep to run the role for
      */
     run: function(creep) {
+        // Check if we need to move aside for other creeps
+        movementManager.checkAndGiveWay(creep);
+        
         // Initialize upgrading state if not set
         if (creep.memory.upgrading === undefined) {
             creep.memory.upgrading = false;
@@ -41,19 +46,17 @@ const roleUpgrader = {
             if (upgradeResult === ERR_NOT_IN_RANGE) {
                 // Use cached position if available
                 if (creep.memory.controllerPos) {
-                    creep.moveTo(
-                        new RoomPosition(
-                            creep.memory.controllerPos.x,
-                            creep.memory.controllerPos.y,
-                            creep.memory.controllerPos.roomName
-                        ),
-                        { 
-                            reusePath: 20, // Reuse path for longer since controller position is static
-                            visualizePathStyle: {stroke: '#ffffff'}
-                        }
+                    const controllerPos = new RoomPosition(
+                        creep.memory.controllerPos.x,
+                        creep.memory.controllerPos.y,
+                        creep.memory.controllerPos.roomName
                     );
+                    movementManager.moveToTarget(creep, controllerPos, { 
+                        reusePath: 20, // Reuse path for longer since controller position is static
+                        visualizePathStyle: {stroke: '#ffffff'}
+                    });
                 } else {
-                    creep.moveTo(creep.room.controller, { 
+                    movementManager.moveToTarget(creep, creep.room.controller, { 
                         reusePath: 20,
                         visualizePathStyle: {stroke: '#ffffff'}
                     });
@@ -221,31 +224,27 @@ const roleUpgrader = {
             
             if (actionResult === ERR_NOT_IN_RANGE) {
                 // Use cached position for movement
-                creep.moveTo(
-                    new RoomPosition(
-                        creep.memory.sourcePos.x,
-                        creep.memory.sourcePos.y,
-                        creep.memory.sourcePos.roomName
-                    ),
-                    { 
-                        reusePath: 15,
-                        visualizePathStyle: {stroke: '#ffaa00'}
-                    }
+                const sourcePos = new RoomPosition(
+                    creep.memory.sourcePos.x,
+                    creep.memory.sourcePos.y,
+                    creep.memory.sourcePos.roomName
                 );
+                movementManager.moveToTarget(creep, sourcePos, { 
+                    reusePath: 15,
+                    visualizePathStyle: {stroke: '#ffaa00'}
+                });
             } else if (actionResult !== OK) {
                 console.log(`Upgrader ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
             }
         } else {
             // If no energy source found, move to controller area to wait
             if (creep.memory.controllerPos) {
-                creep.moveTo(
-                    new RoomPosition(
-                        creep.memory.controllerPos.x + 2,
-                        creep.memory.controllerPos.y + 2,
-                        creep.memory.controllerPos.roomName
-                    ),
-                    { reusePath: 20 }
+                const waitPos = new RoomPosition(
+                    creep.memory.controllerPos.x + 2,
+                    creep.memory.controllerPos.y + 2,
+                    creep.memory.controllerPos.roomName
                 );
+                movementManager.moveToTarget(creep, waitPos, { reusePath: 20 });
             }
         }
     }

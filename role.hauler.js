@@ -2,8 +2,13 @@
  * Hauler Role - Energy transport
  * Optimized for CPU efficiency
  */
+const movementManager = require('movementManager');
+
 const roleHauler = {
     run: function(creep) {
+        // Check if we need to move aside for other creeps
+        movementManager.checkAndGiveWay(creep);
+        
         // Check and clean up builder assignments if needed
         this.checkBuilderAssignments(creep);
         
@@ -258,7 +263,7 @@ const roleHauler = {
                 }
             } else {
                 // Move to the builder or meeting point
-                creep.moveTo(meetingPoint, { 
+                movementManager.moveToTarget(creep, meetingPoint, { 
                     reusePath: 10,
                     visualizePathStyle: {stroke: '#ffaa00'}
                 });
@@ -290,7 +295,7 @@ const roleHauler = {
                 }
                 
                 if (creep.upgradeController(target) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target, { 
+                    movementManager.moveToTarget(creep, target, { 
                         reusePath: 10,
                         visualizePathStyle: {stroke: '#ffffff'}
                     });
@@ -298,7 +303,7 @@ const roleHauler = {
             } else {
                 // Transfer energy to structure
                 if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target, { 
+                    movementManager.moveToTarget(creep, target, { 
                         reusePath: 10,
                         visualizePathStyle: {stroke: '#ffffff'}
                     });
@@ -395,13 +400,13 @@ const roleHauler = {
             }
             
             if (actionResult === ERR_NOT_IN_RANGE) {
-                creep.moveTo(source, { reusePath: 10 });
+                movementManager.moveToTarget(creep, source, { reusePath: 10 });
             }
         } else {
             // If no energy sources, wait near spawn
             const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
             if (spawn) {
-                creep.moveTo(spawn, { range: 3, reusePath: 20 });
+                movementManager.moveToTarget(creep, spawn, { range: 3, reusePath: 20 });
             }
         }
     }

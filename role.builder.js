@@ -2,12 +2,17 @@
  * Builder Role - Construction and repair
  * CPU optimized for maximum efficiency
  */
+const movementManager = require('movementManager');
+
 const roleBuilder = {
     /**
      * Run the builder role
      * @param {Creep} creep - The creep to run the role for
      */
     run: function(creep) {
+        // Check if we need to move aside for other creeps
+        movementManager.checkAndGiveWay(creep);
+        
         // Initialize building state if not set
         if (creep.memory.building === undefined) {
             creep.memory.building = false;
@@ -124,17 +129,15 @@ const roleBuilder = {
                 }
                 
                 if (actionResult === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(
-                        new RoomPosition(
-                            creep.memory.targetPos.x,
-                            creep.memory.targetPos.y,
-                            creep.memory.targetPos.roomName
-                        ),
-                        { 
-                            reusePath: 10,
-                            visualizePathStyle: {stroke: '#3333ff'}
-                        }
+                    const targetPos = new RoomPosition(
+                        creep.memory.targetPos.x,
+                        creep.memory.targetPos.y,
+                        creep.memory.targetPos.roomName
                     );
+                    movementManager.moveToTarget(creep, targetPos, { 
+                        reusePath: 10,
+                        visualizePathStyle: {stroke: '#3333ff'}
+                    });
                 } else if (actionResult === ERR_INVALID_TARGET) {
                     console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target`);
                     delete creep.memory.targetId;
@@ -316,7 +319,7 @@ const roleBuilder = {
             // If no energy source found, move to a waiting area near spawn
             const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
             if (spawn) {
-                creep.moveTo(spawn, { range: 3, reusePath: 20 });
+                movementManager.moveToTarget(creep, spawn, { range: 3, reusePath: 20 });
             }
         }
     },
@@ -558,17 +561,15 @@ const roleBuilder = {
         }
         
         if (actionResult === ERR_NOT_IN_RANGE) {
-            creep.moveTo(
-                new RoomPosition(
-                    creep.memory.sourcePos.x,
-                    creep.memory.sourcePos.y,
-                    creep.memory.sourcePos.roomName
-                ),
-                { 
-                    reusePath: 10,
-                    visualizePathStyle: {stroke: '#ffaa00'}
-                }
+            const sourcePos = new RoomPosition(
+                creep.memory.sourcePos.x,
+                creep.memory.sourcePos.y,
+                creep.memory.sourcePos.roomName
             );
+            movementManager.moveToTarget(creep, sourcePos, { 
+                reusePath: 10,
+                visualizePathStyle: {stroke: '#ffaa00'}
+            });
         } else if (actionResult !== OK) {
             // Log errors other than distance
             console.log(`Builder ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);

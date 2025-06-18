@@ -535,8 +535,8 @@ const roomManager = {
         
         // Calculate optimal creep counts based on infrastructure
         const result = {
-            harvester: Math.min(sourceCount, 2), // Max 1 per source, but at least 2 total
-            hauler: Math.min(Math.max(1, containers), sourceCount + storage),
+            harvester: Math.min(sourceCount*2, 2), // Max 2 per source, but at least 2 total
+            hauler: Math.min(Math.max(1, containers), sourceCount + storage), // At least 1, but more if we have containers or storage
             upgrader: rcl < 8 ? Math.min(rcl <= 3 ? 1 : 2, 2) : 1, // 1-2 based on RCL
             builder: 0, // Will be calculated based on construction needs
             total: 0
@@ -544,7 +544,7 @@ const roomManager = {
         
         // Adjust builder count based on construction sites
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-        result.builder = constructionSites > 0 ? Math.min(2, Math.ceil(constructionSites / 5)) : 0;
+        result.builder = constructionSites > 0 ? Math.min(3, Math.ceil((constructionSites / 5) + 1)) : 0; // 1 builder per 5 sites + 1 repair, max 3
         
         // Apply manual limits if set
         if (room.memory.creepLimits) {
