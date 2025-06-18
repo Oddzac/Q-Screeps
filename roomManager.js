@@ -784,10 +784,12 @@ const roomManager = {
             total: 0
         };
         
-        // Adjust builder count based on construction sites - more gradual scaling
+        // Adjust builder count based on construction sites and repair needs - always at least 1 for repairs
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-        result.builder = constructionSites > 0 ? 
-            Math.min(3, Math.max(1, Math.floor(constructionSites / 5))) : 0;
+        const repairTargets = this.getRoomData(room.name, 'repairTargets') || 0;
+        
+        // Always have at least 1 builder for repairs, more if there are construction sites
+        result.builder = Math.min(3, Math.max(1, Math.floor(constructionSites / 5)));
         
         // Apply manual limits if set
         if (room.memory.creepLimits) {

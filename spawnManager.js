@@ -130,7 +130,7 @@ const spawnManager = {
         const minHarvesters = Math.min(maxHarvesters, 1); // At least 1 harvester
         const minHaulers = maxHarvesters > 0 ? Math.min(maxHaulers, 1) : 0; // At least 1 hauler if we have harvesters
         const minUpgraders = Math.min(maxUpgraders, 1); // At least 1 upgrader
-        const minBuilders = constructionSites > 0 ? Math.min(maxBuilders, 1) : 0; // At least 1 builder if construction exists
+        const minBuilders = Math.min(maxBuilders, 1); // Always at least 1 builder for repairs
         
         // Total creep cap based on RCL - more flexible limits
         const maxTotalCreeps = optimalCounts ? optimalCounts.total : Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 10 : 12)); 
@@ -193,7 +193,7 @@ const spawnManager = {
         const priorities = [
             { role: 'harvester', deficit: harvesterDeficit, max: maxHarvesters, current: counts.harvester },
             { role: 'hauler', deficit: haulerDeficit, max: maxHaulers, current: counts.hauler },
-            { role: 'builder', deficit: constructionSites > 0 ? builderDeficit : 0, max: maxBuilders, current: counts.builder },
+            { role: 'builder', deficit: builderDeficit, max: maxBuilders, current: counts.builder }, // Always consider builders for repairs
             { role: 'upgrader', deficit: upgraderDeficit, max: maxUpgraders, current: counts.upgrader }
         ];
         
@@ -208,16 +208,28 @@ const spawnManager = {
                 priority.deficit *= 1.3; // Haulers are important once we have harvesters
             }
             
-            // Boost builder priority when we have construction sites for critical structures
-            if (priority.role === 'builder' && constructionSites > 0) {
-                // Check if we have extensions or containers being built (critical infrastructure)
-                const criticalSites = room.find(FIND_CONSTRUCTION_SITES, {
-                    filter: site => site.structureType === STRUCTURE_EXTENSION || 
-                                   site.structureType === STRUCTURE_CONTAINER
-                }).length;
+            // Boost builder priority when we have construction sites or repair needs
+            if (priority.role === 'builder') {
+                // Always ensure we have at least one builder for repairs
+                if (counts.builder === 0) {
+                    priority.deficit = Math.max(priority.deficit, 50); // High priority for first builder
+                }
                 
-                if (criticalSites > 0 && rcl <= 3) {
-                    priority.deficit *= 1.4; // Critical infrastructure at low RCL
+                // Check if we have extensions or containers being built (critical infrastructure)
+                if (constructionSites > 0) {
+                    const criticalSites = room.find(FIND_CONSTRUCTION_SITES, {
+                        filter: site => site.structureType === STRUCTURE_EXTENSION || 
+                                      site.structureType === STRUCTURE_CONTAINER
+                    }).length;
+                    
+                    if (criticalSites > 0 && rcl <= 3) {
+                        priority.deficit *= 1.4; // Critical infrastructure at low RCL
+                    }
+                }
+                
+                // Boost priority if there are repair targets
+                if (repairTargets > 0) {
+                    priority.deficit *= 1.2; // Increase priority for repairs
                 }
             }
             
@@ -267,7 +279,12 @@ const spawnManager = {
         });
         
         if (result === OK) {
-            console.log(`Spawning ${role}: ${body.length} parts`);
+            // Special message for builders when there are no construction sites (repair-focused)
+            if (role === 'builder' && spawn.room.find(FIND_CONSTRUCTION_SITES).length === 0) {
+                console.log(`Spawning repair-focused ${role}: ${body.length} parts`);
+            } else {
+                console.log(`Spawning ${role}: ${body.length} parts`);
+            }
             return true;
         }
         
