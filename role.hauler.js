@@ -87,15 +87,12 @@ const roleHauler = {
         const room = creep.room;
         const roomManager = require('roomManager');
         
-        // First check if spawns or extensions need energy
-        const spawnsAndExtensions = room.find(FIND_STRUCTURES, {
-            filter: s => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && 
-                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-        });
+        // Get cached energy targets from room manager
+        const targets = roomManager.analyzeEnergyTargets(room);
         
-        // If any spawns or extensions need energy, prioritize them
-        if (spawnsAndExtensions.length > 0) {
-            const closest = spawnsAndExtensions.reduce((closest, structure) => {
+        // First check if spawns or extensions need energy (highest priority)
+        if (targets.spawnsAndExtensions.length > 0) {
+            const closest = targets.spawnsAndExtensions.reduce((closest, structure) => {
                 const distance = creep.pos.getRangeTo(structure);
                 return !closest || distance < creep.pos.getRangeTo(closest) ? structure : closest;
             }, null);
@@ -106,7 +103,7 @@ const roleHauler = {
             }
         }
         
-        // Only check for builder energy requests if spawns and extensions are full
+        // Check for builder energy requests (second priority)
         if (room.memory.energyRequests && Object.keys(room.memory.energyRequests).length > 0) {
             // Find the highest priority builder request
             let bestRequest = null;
@@ -152,56 +149,26 @@ const roleHauler = {
             }
         }
         
-        // If no builder requests, proceed with normal delivery targets
-        
-        // Use cached room data if available
-        if (room.memory.energyStructures && Game.time - (room.memory.energyStructuresTime || 0) < 10) {
-            for (const id of room.memory.energyStructures) {
-                const target = Game.getObjectById(id);
-                if (target && target.store && target.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-                    creep.memory.targetId = id;
-                    return;
-                }
-            }
+        // Check for towers that need energy (third priority)
+        if (targets.towers.length > 0) {
+            creep.memory.targetId = targets.towers[0].id;
+            return;
         }
         
-        // Find all energy-needing structures in one operation
-        const targets = room.find(FIND_STRUCTURES, {
-            filter: s => (
-                ((s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && 
-                 s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) ||
-                (s.structureType === STRUCTURE_TOWER && 
-                 s.store.getFreeCapacity(RESOURCE_ENERGY) > s.store.getCapacity(RESOURCE_ENERGY) * 0.2) ||
-                s.structureType === STRUCTURE_STORAGE
-            )
-        });
-        
-        // Sort by priority and distance
-        if (targets.length) {
-            targets.sort((a, b) => {
-                // Priority: Spawn/Extension > Tower > Storage
-                const typeA = a.structureType === STRUCTURE_EXTENSION || a.structureType === STRUCTURE_SPAWN ? 0 :
-                             a.structureType === STRUCTURE_TOWER ? 1 : 2;
-                const typeB = b.structureType === STRUCTURE_EXTENSION || b.structureType === STRUCTURE_SPAWN ? 0 :
-                             b.structureType === STRUCTURE_TOWER ? 1 : 2;
-                
-                if (typeA !== typeB) return typeA - typeB;
-                
-                // If same type, sort by distance
-                return creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b);
-            });
-            
-            creep.memory.targetId = targets[0].id;
-            
-            // Cache energy structures for the room
-            if (!room.memory.energyStructures || Game.time - (room.memory.energyStructuresTime || 0) >= 10) {
-                room.memory.energyStructures = targets.map(t => t.id);
-                room.memory.energyStructuresTime = Game.time;
-            }
-        } else {
-            // Controller as fallback
-            creep.memory.targetId = room.controller.id;
+        // Find controller containers (fourth priority)
+        if (targets.controllerContainers.length > 0) {
+            creep.memory.targetId = targets.controllerContainers[0].id;
+            return;
         }
+        
+        // Check for storage (fifth priority)
+        if (targets.storage) {
+            creep.memory.targetId = targets.storage.id;
+            return;
+        }
+        
+        // If all else fails, use controller as fallback
+        creep.memory.targetId = room.controller.id;
     },
     
     deliverEnergy: function(creep) {
@@ -325,66 +292,49 @@ const roleHauler = {
         }
         
         if (!source) {
-            // Use room cache if available
-            if (creep.room.memory.energySources && Game.time - (creep.room.memory.energySourcesTime || 0) < 10) {
-                for (const id of creep.room.memory.energySources) {
-                    const potentialSource = Game.getObjectById(id);
-                    if ((potentialSource && potentialSource.amount !== undefined && potentialSource.amount >= 50) || 
-                        (potentialSource && potentialSource.store && potentialSource.store[RESOURCE_ENERGY] > 0)) {
-                        source = potentialSource;
-                        creep.memory.sourceId = id;
-                        break;
+            // Get cached energy sources from room manager
+            const roomManager = require('roomManager');
+            const sources = roomManager.analyzeEnergySources(creep.room);
+            
+            // Create prioritized list of sources
+            const allSources = [];
+            
+            // Add sources in priority order
+            allSources.push(...sources.droppedResources);
+            allSources.push(...sources.tombstones);
+            allSources.push(...sources.sourceContainers);
+            allSources.push(...sources.otherContainers);
+            if (sources.storage) allSources.push(sources.storage);
+            
+            if (allSources.length > 0) {
+                // Find closest source of highest priority
+                let bestSource = null;
+                let bestScore = Infinity;
+                
+                for (const s of allSources) {
+                    // Calculate priority score (lower is better)
+                    let typeScore;
+                    
+                    // Priority: Dropped > Tombstone > Source Container > Other Container > Storage
+                    if (s.amount !== undefined) typeScore = 0; // Dropped resource
+                    else if (s.store && !s.structureType) typeScore = 1; // Tombstone
+                    else if (sources.sourceContainers.includes(s)) typeScore = 2; // Source container
+                    else if (sources.otherContainers.includes(s)) typeScore = 3; // Other container
+                    else typeScore = 4; // Storage
+                    
+                    // Factor in distance (less important than type)
+                    const distance = creep.pos.getRangeTo(s);
+                    const score = (typeScore * 100) + distance;
+                    
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestSource = s;
                     }
                 }
-            }
-            
-            // If no valid source in cache, find new sources
-            if (!source) {
-                // Find all energy sources in one operation
-                const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES, {
-                    filter: r => r.resourceType === RESOURCE_ENERGY && r.amount >= 50
-                });
                 
-                const containers = creep.room.find(FIND_STRUCTURES, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER && 
-                              s.store[RESOURCE_ENERGY] > 0
-                });
-                
-                const tombstones = creep.room.find(FIND_TOMBSTONES, {
-                    filter: t => t.store[RESOURCE_ENERGY] > 0
-                });
-                
-                // Combine all sources
-                const allSources = [
-                    ...droppedResources,
-                    ...containers,
-                    ...(creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 0 ? [creep.room.storage] : []),
-                    ...tombstones
-                ];
-                
-                // Sort by priority and distance
-                if (allSources.length) {
-                    allSources.sort((a, b) => {
-                        // Priority: Dropped > Container > Storage > Tombstone
-                        const typeA = a.amount !== undefined ? 0 : 
-                                    a.structureType === STRUCTURE_CONTAINER ? 1 :
-                                    a.structureType === STRUCTURE_STORAGE ? 2 : 3;
-                        const typeB = b.amount !== undefined ? 0 : 
-                                    b.structureType === STRUCTURE_CONTAINER ? 1 :
-                                    b.structureType === STRUCTURE_STORAGE ? 2 : 3;
-                        
-                        if (typeA !== typeB) return typeA - typeB;
-                        
-                        // If same type, sort by distance
-                        return creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b);
-                    });
-                    
-                    source = allSources[0];
-                    creep.memory.sourceId = source.id;
-                    
-                    // Cache energy sources for the room
-                    creep.room.memory.energySources = allSources.map(s => s.id);
-                    creep.room.memory.energySourcesTime = Game.time;
+                if (bestSource) {
+                    source = bestSource;
+                    creep.memory.sourceId = bestSource.id;
                 }
             }
         }

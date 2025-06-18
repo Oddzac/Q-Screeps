@@ -516,6 +516,103 @@ const roomManager = {
     },
     
     /**
+     * Analyze and cache energy sources in a room
+     * @param {Room} room - The room to analyze
+     * @returns {Object} - Categorized energy sources
+     */
+    analyzeEnergySources: function(room) {
+        // Cache for 5 ticks since these change frequently
+        const cacheKey = `energySources_${room.name}`;
+        if (this.cache[cacheKey] && Game.time - this.cache[cacheKey].time < 5) {
+            return this.cache[cacheKey].value;
+        }
+
+        const droppedResources = room.find(FIND_DROPPED_RESOURCES, {
+            filter: r => r.resourceType === RESOURCE_ENERGY && r.amount >= 50
+        });
+        
+        const tombstones = room.find(FIND_TOMBSTONES, {
+            filter: t => t.store[RESOURCE_ENERGY] > 0
+        });
+        
+        // Find and categorize containers
+        const containers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                      s.store[RESOURCE_ENERGY] > 0
+        });
+        
+        const sourceContainers = containers.filter(c => 
+            room.find(FIND_SOURCES, {
+                filter: source => source.pos.inRangeTo(c, 2)
+            }).length > 0
+        );
+        
+        const otherContainers = containers.filter(c => !sourceContainers.includes(c));
+        
+        // Sort source containers by energy content
+        sourceContainers.sort((a, b) => b.store[RESOURCE_ENERGY] - a.store[RESOURCE_ENERGY]);
+        
+        const result = {
+            droppedResources,
+            tombstones,
+            sourceContainers,
+            otherContainers,
+            storage: room.storage && room.storage.store[RESOURCE_ENERGY] > 0 ? room.storage : null
+        };
+        
+        this.cache[cacheKey] = {
+            time: Game.time,
+            value: result
+        };
+        
+        return result;
+    },
+    
+    /**
+     * Analyze and cache energy delivery targets in a room
+     * @param {Room} room - The room to analyze
+     * @returns {Object} - Categorized energy targets
+     */
+    analyzeEnergyTargets: function(room) {
+        // Cache for 3 ticks since spawn/extension energy changes frequently
+        const cacheKey = `energyTargets_${room.name}`;
+        if (this.cache[cacheKey] && Game.time - this.cache[cacheKey].time < 3) {
+            return this.cache[cacheKey].value;
+        }
+
+        const spawnsAndExtensions = room.find(FIND_STRUCTURES, {
+            filter: s => (s.structureType === STRUCTURE_EXTENSION || 
+                         s.structureType === STRUCTURE_SPAWN) && 
+                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        });
+
+        const towers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_TOWER && 
+                      s.store.getFreeCapacity(RESOURCE_ENERGY) > s.store.getCapacity(RESOURCE_ENERGY) * 0.2
+        }).sort((a, b) => a.store[RESOURCE_ENERGY] - b.store[RESOURCE_ENERGY]);
+
+        const controllerContainers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                      s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
+                      s.pos.inRangeTo(room.controller, 3)
+        }).sort((a, b) => b.store.getFreeCapacity(RESOURCE_ENERGY) - a.store.getFreeCapacity(RESOURCE_ENERGY));
+
+        const result = {
+            spawnsAndExtensions,
+            towers,
+            controllerContainers,
+            storage: room.storage && room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? room.storage : null
+        };
+
+        this.cache[cacheKey] = {
+            time: Game.time,
+            value: result
+        };
+
+        return result;
+    },
+    
+    /**
      * Analyze room infrastructure to determine optimal creep counts
      * @param {Room} room - The room to analyze
      * @returns {Object} - Recommended creep counts
