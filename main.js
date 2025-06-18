@@ -272,23 +272,13 @@ global.fixStuckBuilders = function(roomName) {
     );
     
     let fixed = 0;
+    const roleBuilder = require('role.builder');
     
     for (const builder of builders) {
         // Check if this builder is stuck
-        if (builder.memory.targetId === room.controller.id) {
-            // For repairers, force upgrading mode
-            if (builder.memory.isRepairer === true) {
-                builder.memory.forceUpgrade = Game.time + 300; // Force upgrading for 300 ticks
-                builder.say('⚡ Upgrade');
-                console.log(`Manually switched ${builder.name} to upgrading mode for 300 ticks`);
-            } else {
-                // For regular builders, just reset
-                delete builder.memory.targetId;
-                delete builder.memory.targetPos;
-                delete builder.memory.lastTargetSearch;
-                delete builder.memory.errorCount;
-                builder.say('🔄 Reset');
-            }
+        if (builder.memory.targetId === room.controller.id || builder.memory.errorCount > 0) {
+            // Reset the builder using our improved function
+            roleBuilder.resetStuckBuilder(builder);
             fixed++;
         }
     }

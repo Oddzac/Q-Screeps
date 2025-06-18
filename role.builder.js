@@ -22,6 +22,12 @@ const roleBuilder = {
         // The first builder in each room becomes the dedicated repairer
         this.assignRepairRole(creep);
         
+        // Check if this builder is stuck and reset if needed
+        if (this.isStuck(creep)) {
+            this.resetStuckBuilder(creep);
+            return; // Skip the rest of the logic for this tick
+        }
+        
         // State switching with minimal operations
         if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.building = false;
@@ -176,21 +182,16 @@ const roleBuilder = {
                     // Track error count for this target
                     creep.memory.errorCount = (creep.memory.errorCount || 0) + 1;
                     
-                    // Special handling for controller targets
-                    if (target.structureType === STRUCTURE_CONTROLLER) {
-                        console.log(`Builder ${creep.name} has invalid controller target, forcing upgrade mode`);
-                        // Force upgrading mode immediately for controller targets
+                    // Handle any invalid target
+                    console.log(`Builder ${creep.name} has invalid target, finding new target (error #${creep.memory.errorCount})`);
+                    
+                    // If we've had multiple errors with this target, do a full reset
+                    if (creep.memory.errorCount >= 2) {
                         this.resetStuckBuilder(creep);
                     } else {
-                        console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target (error #${creep.memory.errorCount})`);
-                        
-                        // If we've had multiple errors with this target, do a full reset
-                        if (creep.memory.errorCount >= 3) {
-                            this.resetStuckBuilder(creep);
-                        } else {
-                            delete creep.memory.targetId;
-                            delete creep.memory.targetPos;
-                        }
+                        // Just clear the target and let the normal logic find a new one
+                        delete creep.memory.targetId;
+                        delete creep.memory.targetPos;
                     }
                 } else if (actionResult !== OK) {
                     // Log errors other than distance
@@ -231,14 +232,23 @@ const roleBuilder = {
     },
     
     /**
-     * Check if a repairer is in forced upgrading mode
-     * @param {Creep} creep - The repairer creep
-     * @returns {boolean} - Whether the repairer is in upgrading mode
+     * Check if a builder is stuck
+     * @param {Creep} creep - The creep to check
+     * @returns {boolean} - Whether the creep is stuck
      */
-    isRepairerUpgrading: function(creep) {
-        return creep.memory.isRepairer === true && 
-               creep.memory.forceUpgrade && 
-               Game.time < creep.memory.forceUpgrade;
+    isStuck: function(creep) {
+        // Check if targeting controller and is a repairer
+        if (creep.memory.isRepairer === true && 
+            creep.memory.targetId === creep.room.controller.id) {
+            return true;
+        }
+        
+        // Check if has error count
+        if (creep.memory.errorCount && creep.memory.errorCount >= 2) {
+            return true;
+        }
+        
+        return false;
     },
     
     /**
@@ -300,30 +310,47 @@ const roleBuilder = {
         const roomManager = require('roomManager');
         let target = null;
         
-        // Check if creep is forced to upgrade (after being stuck)
-        if (creep.memory.forceUpgrade && Game.time < creep.memory.forceUpgrade) {
-            creep.say('⚡ Upgrade');
-            return creep.room.controller;
-        }
-        
-        // If this is a repairer, check if it should help with construction
+        // If this is a repairer, look for repair targets first
         if (creep.memory.isRepairer === true) {
-            // Check if repairer should temporarily help with construction
-            if (this.shouldRepairerHelpConstruct(creep)) {
-                // Look for critical construction sites
-                const criticalSites = creep.room.find(FIND_CONSTRUCTION_SITES, {
-                    filter: site => site.structureType === STRUCTURE_SPAWN || 
-                                  site.structureType === STRUCTURE_EXTENSION ||
-                                  site.structureType === STRUCTURE_TOWER
-                });
-                
-                if (criticalSites.length > 0) {
-                    return this.findClosestByRange(creep, criticalSites);
-                }
+            // Look for repair targets
+            const repairTargets = creep.room.find(FIND_STRUCTURES, {
+                filter: s => s.hits < s.hitsMax * 0.8 && 
+                          (s.structureType === STRUCTURE_CONTAINER || 
+                           s.structureType === STRUCTURE_SPAWN ||
+                           s.structureType === STRUCTURE_EXTENSION ||
+                           s.structureType === STRUCTURE_TOWER ||
+                           s.structureType === STRUCTURE_ROAD)
+            });
+            
+            if (repairTargets.length > 0) {
+                return this.findClosestByRange(creep, repairTargets);
             }
             
-            // Otherwise, look for repair targets
-            return this.findRepairTarget(creep);
+            // If no repair targets, check for critical construction sites
+            const criticalSites = creep.room.find(FIND_CONSTRUCTION_SITES, {
+                filter: site => site.structureType === STRUCTURE_SPAWN || 
+                              site.structureType === STRUCTURE_EXTENSION ||
+                              site.structureType === STRUCTURE_TOWER
+            });
+            
+            if (criticalSites.length > 0) {
+                return this.findClosestByRange(creep, criticalSites);
+            }
+            
+            // If no critical sites, check for any construction sites
+            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            if (sites.length > 0) {
+                return this.findClosestByRange(creep, sites);
+            }
+            
+            // If nothing to repair or build, find a spawn to move to
+            const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+            if (spawn) {
+                return spawn;
+            }
+            
+            // Last resort - return controller
+            return creep.room.controller;
         }
         
         // For builders, prioritize construction sites
@@ -391,11 +418,6 @@ const roleBuilder = {
      * @returns {Object} - The repair target or fallback target
      */
     findRepairTarget: function(creep) {
-        // If repairer is in forced upgrading mode, return controller
-        if (this.isRepairerUpgrading(creep)) {
-            return creep.room.controller;
-        }
-        
         // Prioritize critical structures (containers over roads)
         const repairTargets = creep.room.find(FIND_STRUCTURES, {
             filter: s => s.hits < s.hitsMax * 0.5 && // Only repair if below 50%
@@ -781,31 +803,63 @@ const roleBuilder = {
      * @param {Creep} creep - The creep to reset
      */
     resetStuckBuilder: function(creep) {
-        // Check if this is a repairer stuck on controller
-        const isStuckOnController = creep.memory.targetId === creep.room.controller.id && 
-                                   creep.memory.isRepairer === true;
-        
         // Clear all target-related memory
         delete creep.memory.targetId;
         delete creep.memory.targetPos;
         delete creep.memory.lastTargetSearch;
+        delete creep.memory.forceUpgrade;
+        delete creep.memory.errorCount;
         
-        // If this is a repairer stuck on controller, force it to upgrade
-        if (isStuckOnController) {
-            // Set a flag to force upgrading for a while
-            creep.memory.forceUpgrade = Game.time + 300; // Force upgrading for 300 ticks
-            creep.say('⚡ Upgrade');
-            console.log(`Repairer ${creep.name} was stuck on controller, switching to upgrading mode for 300 ticks`);
+        // For repairers, look for repair targets first
+        if (creep.memory.isRepairer === true) {
+            // Look for repair targets
+            const repairTargets = creep.room.find(FIND_STRUCTURES, {
+                filter: s => s.hits < s.hitsMax * 0.8 && 
+                          (s.structureType === STRUCTURE_CONTAINER || 
+                           s.structureType === STRUCTURE_SPAWN ||
+                           s.structureType === STRUCTURE_EXTENSION ||
+                           s.structureType === STRUCTURE_TOWER ||
+                           s.structureType === STRUCTURE_ROAD)
+            });
             
-            // Set controller as target
-            creep.memory.targetId = creep.room.controller.id;
-            creep.memory.targetPos = {
-                x: creep.room.controller.pos.x,
-                y: creep.room.controller.pos.y,
-                roomName: creep.room.name
-            };
+            if (repairTargets.length > 0) {
+                // Find closest repair target
+                const target = this.findClosestByRange(creep, repairTargets);
+                creep.memory.targetId = target.id;
+                creep.memory.targetPos = {
+                    x: target.pos.x,
+                    y: target.pos.y,
+                    roomName: target.pos.roomName
+                };
+                creep.say('🔧');
+                console.log(`Repairer ${creep.name} reset to repair target: ${target.id}`);
+                return;
+            }
+            
+            // If no repair targets, look for construction sites
+            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            if (sites.length > 0) {
+                const target = this.findClosestByRange(creep, sites);
+                creep.memory.targetId = target.id;
+                creep.memory.targetPos = {
+                    x: target.pos.x,
+                    y: target.pos.y,
+                    roomName: target.pos.roomName
+                };
+                creep.say('🏗️');
+                console.log(`Repairer ${creep.name} reset to construction site: ${target.id}`);
+                return;
+            }
+            
+            // If nothing to repair or build, just move away from controller
+            const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+            if (spawn) {
+                creep.moveTo(spawn);
+                creep.say('🏠');
+                console.log(`Repairer ${creep.name} has no targets, moving to spawn`);
+            }
         } else {
-            // For other cases, force a new target search
+            // For regular builders, find a new target
             const target = this.findBuildTarget(creep);
             if (target) {
                 creep.memory.targetId = target.id;
@@ -814,12 +868,9 @@ const roleBuilder = {
                     y: target.pos.y,
                     roomName: target.pos.roomName
                 };
-                console.log(`Reset stuck builder ${creep.name}, new target: ${target.id}`);
+                console.log(`Reset builder ${creep.name}, new target: ${target.id}`);
             }
         }
-        
-        // Reset error counter
-        creep.memory.errorCount = 0;
     },
     
     harvestEnergySource: function(creep, source) {
