@@ -122,12 +122,27 @@ const roleBuilder = {
                 if (target.progressTotal !== undefined) {
                     // Construction site
                     actionResult = creep.build(target);
+                    
+                    // If this is a repairer helping with construction, indicate this
+                    if (creep.memory.isRepairer === true) {
+                        creep.say('🏗️');
+                    }
                 } else if (target.structureType === STRUCTURE_CONTROLLER) {
                     // Controller
                     actionResult = creep.upgradeController(target);
+                    
+                    // If this is a repairer helping with upgrading, indicate this
+                    if (creep.memory.isRepairer === true) {
+                        creep.say('⚡');
+                    }
                 } else {
                     // Repair target
                     actionResult = creep.repair(target);
+                    
+                    // If this is a repairer doing repairs, indicate this
+                    if (creep.memory.isRepairer === true) {
+                        creep.say('🔧');
+                    }
                 }
                 
                 if (actionResult === ERR_NOT_IN_RANGE) {
@@ -183,6 +198,51 @@ const roleBuilder = {
     },
     
     /**
+     * Check if a repairer should help with critical construction
+     * @param {Creep} creep - The repairer creep
+     * @returns {boolean} - Whether the repairer should help with construction
+     */
+    shouldRepairerHelpConstruct: function(creep) {
+        // Only check occasionally to save CPU
+        if (!creep.memory.lastConstructCheck || Game.time - creep.memory.lastConstructCheck > 50) {
+            creep.memory.lastConstructCheck = Game.time;
+            
+            // Check for critical repair needs first
+            const criticalRepairs = creep.room.find(FIND_STRUCTURES, {
+                filter: s => s.hits < s.hitsMax * 0.3 && // Severely damaged
+                          (s.structureType === STRUCTURE_SPAWN ||
+                           s.structureType === STRUCTURE_TOWER ||
+                           s.structureType === STRUCTURE_CONTAINER)
+            });
+            
+            // If there are critical repairs, don't help with construction
+            if (criticalRepairs.length > 0) {
+                creep.memory.helpConstruction = false;
+                return false;
+            }
+            
+            // Check for critical construction sites
+            const criticalSites = creep.room.find(FIND_CONSTRUCTION_SITES, {
+                filter: site => site.structureType === STRUCTURE_SPAWN || 
+                              site.structureType === STRUCTURE_EXTENSION ||
+                              site.structureType === STRUCTURE_TOWER
+            });
+            
+            // If there are critical sites, help with construction
+            if (criticalSites.length > 0) {
+                creep.memory.helpConstruction = true;
+                return true;
+            }
+            
+            // Default to not helping with construction
+            creep.memory.helpConstruction = false;
+        }
+        
+        // Return cached result
+        return creep.memory.helpConstruction === true;
+    },
+    
+    /**
      * Find a build or repair target
      * @param {Creep} creep - The creep to find a target for
      * @returns {Object} - The target object
@@ -191,8 +251,23 @@ const roleBuilder = {
         const roomManager = require('roomManager');
         let target = null;
         
-        // If this is a repairer, only look for repair targets
+        // If this is a repairer, check if it should help with construction
         if (creep.memory.isRepairer === true) {
+            // Check if repairer should temporarily help with construction
+            if (this.shouldRepairerHelpConstruct(creep)) {
+                // Look for critical construction sites
+                const criticalSites = creep.room.find(FIND_CONSTRUCTION_SITES, {
+                    filter: site => site.structureType === STRUCTURE_SPAWN || 
+                                  site.structureType === STRUCTURE_EXTENSION ||
+                                  site.structureType === STRUCTURE_TOWER
+                });
+                
+                if (criticalSites.length > 0) {
+                    return this.findClosestByRange(creep, criticalSites);
+                }
+            }
+            
+            // Otherwise, look for repair targets
             return this.findRepairTarget(creep);
         }
         
@@ -258,7 +333,7 @@ const roleBuilder = {
     /**
      * Find a repair target
      * @param {Creep} creep - The creep to find a repair target for
-     * @returns {Object} - The repair target or controller as fallback
+     * @returns {Object} - The repair target or fallback target
      */
     findRepairTarget: function(creep) {
         // Prioritize critical structures (containers over roads)
@@ -298,7 +373,64 @@ const roleBuilder = {
             return this.findClosestByRange(creep, repairTargets);
         }
         
-        // If no repair targets, default to controller
+        // If no repair targets, check for any structures that need any repair at all
+        const minorRepairTargets = creep.room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax && // Any damage at all
+                      (s.structureType === STRUCTURE_CONTAINER || 
+                       s.structureType === STRUCTURE_SPAWN ||
+                       s.structureType === STRUCTURE_EXTENSION ||
+                       s.structureType === STRUCTURE_TOWER ||
+                       s.structureType === STRUCTURE_ROAD)
+        });
+        
+        if (minorRepairTargets.length > 0) {
+            return this.findClosestByRange(creep, minorRepairTargets);
+        }
+        
+        // If no structures need repair, check for construction sites
+        const constructionSites = creep.room.find(FIND_CONSTRUCTION_SITES);
+        if (constructionSites.length > 0) {
+            // Help with construction if no repairs needed
+            creep.say('🏗️');
+            
+            // Prioritize critical structures
+            const priorityOrder = [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_TOWER, STRUCTURE_CONTAINER, STRUCTURE_ROAD];
+            
+            // Sort sites by priority
+            constructionSites.sort((a, b) => {
+                const aPriority = priorityOrder.indexOf(a.structureType);
+                const bPriority = priorityOrder.indexOf(b.structureType);
+                
+                if (aPriority !== -1 && bPriority !== -1) {
+                    return aPriority - bPriority;
+                }
+                
+                if (aPriority !== -1) return -1;
+                if (bPriority !== -1) return 1;
+                
+                return 0;
+            });
+            
+            return constructionSites[0];
+        }
+        
+        // If no repair targets and no construction sites, check for walls/ramparts to fortify
+        // But only if we have enough energy in storage to spare
+        if (creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 10000) {
+            const fortifyTargets = creep.room.find(FIND_STRUCTURES, {
+                filter: s => (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) &&
+                          s.hits < 50000 // Cap at 50k hits in early game
+            });
+            
+            if (fortifyTargets.length > 0) {
+                // Sort by lowest hits
+                fortifyTargets.sort((a, b) => a.hits - b.hits);
+                creep.say('🧱');
+                return fortifyTargets[0];
+            }
+        }
+        
+        // If nothing to repair or build, default to controller
         return creep.room.controller;
     },
     
