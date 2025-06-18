@@ -975,7 +975,10 @@ const constructionManagerImpl = {
             existingSiteTypes[site.structureType] = (existingSiteTypes[site.structureType] || 0) + 1;
         }
         
-        console.log(`Room ${room.name} has ${existingSites.length} construction sites, creating ${sitesToPlace} more to reach target of ${TARGET_SITES_PER_ROOM}`);
+        // Only log if we're actually going to create sites
+        if (sitesToPlace > 0) {
+            console.log(`Room ${room.name} has ${existingSites.length} construction sites, creating ${sitesToPlace} more to reach target of ${TARGET_SITES_PER_ROOM}`);
+        }
         
         // Determine if we should prioritize non-road structures
         // If we already have mostly road construction sites, prioritize other structures
@@ -999,9 +1002,30 @@ const constructionManagerImpl = {
         }
         
         // Define the order of structure creation based on our prioritization logic
-        const structureOrder = prioritizeNonRoads ? 
+        // If we've been trying roads for too many consecutive ticks without success, force non-road structures
+        if (!room.memory.construction.lastNonRoadTick) {
+            room.memory.construction.lastNonRoadTick = Game.time;
+        }
+        
+        // Initialize tracking for sites placed by type
+        let sitesPlacedForRoads = 0;
+        let sitesPlacedForContainers = 0;
+        let sitesPlacedForExtensions = 0;
+        let sitesPlacedForTowers = 0;
+        let sitesPlacedForStorage = 0;
+        
+        // If we haven't placed a non-road structure in 100 ticks, force non-road priority
+        const forceNonRoads = Game.time - (room.memory.construction.lastNonRoadTick || 0) > 100;
+        
+        // Determine structure order
+        const structureOrder = prioritizeNonRoads || forceNonRoads ? 
             ['containers', 'extensions', 'towers', 'storage', 'roads'] : 
             ['containers', 'extensions', 'roads', 'towers', 'storage'];
+            
+        // Log construction plan if forced or periodically
+        if (forceNonRoads || Game.time % 100 === 0) {
+            console.log(`Room ${room.name} construction plan: ${structureOrder.join(' → ')}${forceNonRoads ? ' (forced non-road priority)' : ''}`);
+        }
             
         // Process each structure type in order
         for (const structureType of structureOrder) {
@@ -1030,10 +1054,14 @@ const constructionManagerImpl = {
                         const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
                         if (result === OK) {
                             sitesPlaced++;
+                            sitesPlacedForContainers++;
                             console.log(`Created container construction site at (${pos.x},${pos.y})`);
                             
                             // Add to site map to prevent duplicates
                             siteMap.set(containerKey, true);
+                            
+                            // Update the timestamp of last non-road structure placement
+                            room.memory.construction.lastNonRoadTick = Game.time;
                         }
                     }
                     
@@ -1076,11 +1104,15 @@ const constructionManagerImpl = {
                             const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
                             if (result === OK) {
                                 sitesPlaced++;
+                                sitesPlacedForExtensions++;
                                 newExtensionsCount++;
                                 console.log(`Created extension construction site at (${pos.x},${pos.y})`);
                                 
                                 // Add to site map to prevent duplicates
                                 siteMap.set(extensionKey, true);
+                                
+                                // Update the timestamp of last non-road structure placement
+                                room.memory.construction.lastNonRoadTick = Game.time;
                             }
                         }
                         
@@ -1105,8 +1137,10 @@ const constructionManagerImpl = {
             const roadPositions = room.memory.construction.roads.positions;
             let newRoadPositions = [];
             
-            // Log the number of road positions to process
-            console.log(`Processing ${roadPositions.length} road positions in room ${room.name}`);
+            // Only log road processing if we're in debug mode or it's a significant number
+            if (room.memory.debugConstruction || roadPositions.length > 10) {
+                console.log(`Processing ${roadPositions.length} road positions in room ${room.name}`);
+            }
             
             // Track how many positions we've checked
             let positionsChecked = 0;
@@ -1216,8 +1250,10 @@ const constructionManagerImpl = {
                 room.memory.construction.roadIndex = endIndex;
             }
             
-            // Log summary
-            console.log(`Road positions: ${positionsChecked} checked, ${positionsSkipped} skipped, ${sitesPlacedForRoads} sites placed`);
+            // Only log road summary if sites were placed or we're in debug mode
+            if (sitesPlacedForRoads > 0 || room.memory.debugConstruction) {
+                console.log(`Road positions: ${positionsChecked} checked, ${positionsSkipped} skipped, ${sitesPlacedForRoads} sites placed`);
+            }
             
             // Update road positions in memory
             room.memory.construction.roads.positions = newRoadPositions;
@@ -1257,8 +1293,12 @@ const constructionManagerImpl = {
                             const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
                             if (result === OK) {
                                 sitesPlaced++;
+                                sitesPlacedForTowers++;
                                 newTowersCount++;
                                 console.log(`Created tower construction site at (${pos.x},${pos.y})`);
+                                
+                                // Update the timestamp of last non-road structure placement
+                                room.memory.construction.lastNonRoadTick = Game.time;
                             }
                         }
                         
@@ -1295,7 +1335,11 @@ const constructionManagerImpl = {
                     const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
                     if (result === OK) {
                         sitesPlaced++;
+                        sitesPlacedForStorage++;
                         console.log(`Created storage construction site at (${pos.x},${pos.y})`);
+                        
+                        // Update the timestamp of last non-road structure placement
+                        room.memory.construction.lastNonRoadTick = Game.time;
                     }
                 }
             }
@@ -1306,9 +1350,32 @@ const constructionManagerImpl = {
         room.memory.constructionSites = updatedSites.length;
         room.memory.constructionSiteIds = updatedSites.map(site => site.id);
         
-        // Log if we created new sites
+        // Calculate total non-road sites placed
+        const nonRoadSitesPlaced = sitesPlacedForContainers + sitesPlacedForExtensions + 
+                                  sitesPlacedForTowers + sitesPlacedForStorage;
+        
+        // Log if we created new sites, with more detail
         if (sitesPlaced > 0) {
-            console.log(`Created ${sitesPlaced} new construction sites in room ${room.name}, total now: ${updatedSites.length}`);
+            // Count sites by type for better reporting
+            const siteTypes = {};
+            for (const site of updatedSites) {
+                siteTypes[site.structureType] = (siteTypes[site.structureType] || 0) + 1;
+            }
+            
+            // Create a summary string
+            const typeSummary = Object.entries(siteTypes)
+                .map(([type, count]) => `${count} ${type}`)
+                .join(', ');
+                
+            // Create a placement summary
+            const placementSummary = [];
+            if (sitesPlacedForContainers > 0) placementSummary.push(`${sitesPlacedForContainers} containers`);
+            if (sitesPlacedForExtensions > 0) placementSummary.push(`${sitesPlacedForExtensions} extensions`);
+            if (sitesPlacedForTowers > 0) placementSummary.push(`${sitesPlacedForTowers} towers`);
+            if (sitesPlacedForStorage > 0) placementSummary.push(`${sitesPlacedForStorage} storage`);
+            if (sitesPlacedForRoads > 0) placementSummary.push(`${sitesPlacedForRoads} roads`);
+            
+            console.log(`Room ${room.name} construction: Created ${sitesPlaced} sites (${placementSummary.join(', ')}), total now: ${updatedSites.length} (${typeSummary})`);
         }
         
         // If we still don't have enough sites, run again next tick
