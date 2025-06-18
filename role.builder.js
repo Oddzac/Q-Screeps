@@ -18,6 +18,10 @@ const roleBuilder = {
             creep.memory.building = false;
         }
         
+        // Determine if this creep should be a repairer
+        // The first builder in each room becomes the dedicated repairer
+        this.assignRepairRole(creep);
+        
         // State switching with minimal operations
         if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.building = false;
@@ -153,6 +157,32 @@ const roleBuilder = {
     },
     
     /**
+     * Assign repair role to the first builder in each room
+     * @param {Creep} creep - The creep to assign role to
+     */
+    assignRepairRole: function(creep) {
+        // Skip if already assigned
+        if (creep.memory.isRepairer !== undefined) return;
+        
+        // Get all builders in the room
+        const builders = creep.room.find(FIND_MY_CREEPS, {
+            filter: c => c.memory.role === 'builder'
+        });
+        
+        // Check if there's already a repairer assigned
+        const existingRepairer = builders.find(b => b.memory.isRepairer === true);
+        
+        // If no repairer exists, assign this creep as repairer
+        if (!existingRepairer) {
+            creep.memory.isRepairer = true;
+            console.log(`${creep.name} assigned as dedicated repairer in room ${creep.room.name}`);
+        } else {
+            // Otherwise, this creep is a builder
+            creep.memory.isRepairer = false;
+        }
+    },
+    
+    /**
      * Find a build or repair target
      * @param {Creep} creep - The creep to find a target for
      * @returns {Object} - The target object
@@ -161,7 +191,12 @@ const roleBuilder = {
         const roomManager = require('roomManager');
         let target = null;
         
-        // Get construction site data from room manager
+        // If this is a repairer, only look for repair targets
+        if (creep.memory.isRepairer === true) {
+            return this.findRepairTarget(creep);
+        }
+        
+        // For builders, prioritize construction sites
         const constructionSiteIds = roomManager.getRoomData(creep.room.name, 'constructionSiteIds');
         
         // Check if there are construction sites
@@ -216,52 +251,55 @@ const roleBuilder = {
             }
         }
         
-        // If no construction sites, look for repair targets
-        if (!target) {
-            // Prioritize critical structures (containers over roads)
-            const repairTargets = creep.room.find(FIND_STRUCTURES, {
-                filter: s => s.hits < s.hitsMax * 0.5 && // Only repair if below 50%
-                          s.hits < 10000 && // Don't repair walls/ramparts beyond this in early game
-                          (s.structureType === STRUCTURE_CONTAINER || 
-                           s.structureType === STRUCTURE_SPAWN ||
-                           s.structureType === STRUCTURE_EXTENSION ||
-                           s.structureType === STRUCTURE_ROAD)
+        // If no construction sites, default to controller
+        return creep.room.controller;
+    },
+    
+    /**
+     * Find a repair target
+     * @param {Creep} creep - The creep to find a repair target for
+     * @returns {Object} - The repair target or controller as fallback
+     */
+    findRepairTarget: function(creep) {
+        // Prioritize critical structures (containers over roads)
+        const repairTargets = creep.room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax * 0.5 && // Only repair if below 50%
+                      s.hits < 10000 && // Don't repair walls/ramparts beyond this in early game
+                      (s.structureType === STRUCTURE_CONTAINER || 
+                       s.structureType === STRUCTURE_SPAWN ||
+                       s.structureType === STRUCTURE_EXTENSION ||
+                       s.structureType === STRUCTURE_TOWER ||
+                       s.structureType === STRUCTURE_ROAD)
+        });
+        
+        // Sort repair targets to prioritize containers over roads
+        if (repairTargets.length > 0) {
+            repairTargets.sort((a, b) => {
+                // Prioritize by structure type
+                const typeOrder = {
+                    [STRUCTURE_SPAWN]: 1,
+                    [STRUCTURE_EXTENSION]: 2,
+                    [STRUCTURE_TOWER]: 3,
+                    [STRUCTURE_CONTAINER]: 4,
+                    [STRUCTURE_ROAD]: 5
+                };
+                
+                const aOrder = typeOrder[a.structureType] || 6;
+                const bOrder = typeOrder[b.structureType] || 6;
+                
+                if (aOrder !== bOrder) {
+                    return aOrder - bOrder;
+                }
+                
+                // If same type, prioritize by damage percentage
+                return (a.hits / a.hitsMax) - (b.hits / b.hitsMax);
             });
             
-            // Sort repair targets to prioritize containers over roads
-            if (repairTargets.length > 0) {
-                repairTargets.sort((a, b) => {
-                    // Prioritize by structure type
-                    const typeOrder = {
-                        [STRUCTURE_SPAWN]: 1,
-                        [STRUCTURE_EXTENSION]: 2,
-                        [STRUCTURE_CONTAINER]: 3,
-                        [STRUCTURE_ROAD]: 4
-                    };
-                    
-                    const aOrder = typeOrder[a.structureType] || 5;
-                    const bOrder = typeOrder[b.structureType] || 5;
-                    
-                    if (aOrder !== bOrder) {
-                        return aOrder - bOrder;
-                    }
-                    
-                    // If same type, prioritize by damage percentage
-                    return (a.hits / a.hitsMax) - (b.hits / b.hitsMax);
-                });
-            }
-            
-            if (repairTargets.length > 0) {
-                target = this.findClosestByRange(creep, repairTargets);
-            }
+            return this.findClosestByRange(creep, repairTargets);
         }
         
         // If no repair targets, default to controller
-        if (!target) {
-            target = creep.room.controller;
-        }
-        
-        return target;
+        return creep.room.controller;
     },
     
     /**
@@ -475,6 +513,11 @@ const roleBuilder = {
     calculateRequestPriority: function(creep) {
         let priority = 50; // Base priority
         
+        // Give repairers higher base priority
+        if (creep.memory.isRepairer === true) {
+            priority -= 10; // Repairers get higher priority
+        }
+        
         // If the builder has a target, adjust priority based on target type
         if (creep.memory.targetId) {
             const target = Game.getObjectById(creep.memory.targetId);
@@ -512,6 +555,11 @@ const roleBuilder = {
                     const healthPercent = target.hits / target.hitsMax;
                     if (healthPercent < 0.25) {
                         priority -= 10; // Severely damaged, higher priority
+                    }
+                    
+                    // Additional priority for repairers working on repairs
+                    if (creep.memory.isRepairer === true) {
+                        priority -= 5; // Extra priority for repairers doing their job
                     }
                 }
                 // Controller

@@ -210,9 +210,16 @@ const spawnManager = {
             
             // Boost builder priority when we have construction sites or repair needs
             if (priority.role === 'builder') {
+                // Check if we have a dedicated repairer in the room
+                const hasRepairer = _.some(Game.creeps, creep => 
+                    creep.memory.role === 'builder' && 
+                    creep.memory.isRepairer === true && 
+                    creep.memory.homeRoom === room.name
+                );
+                
                 // Always ensure we have at least one builder for repairs
-                if (counts.builder === 0) {
-                    priority.deficit = Math.max(priority.deficit, 50); // High priority for first builder
+                if (!hasRepairer) {
+                    priority.deficit = Math.max(priority.deficit, 70); // Very high priority for first builder (repairer)
                 }
                 
                 // Check if we have extensions or containers being built (critical infrastructure)
@@ -225,11 +232,16 @@ const spawnManager = {
                     if (criticalSites > 0 && rcl <= 3) {
                         priority.deficit *= 1.4; // Critical infrastructure at low RCL
                     }
+                    
+                    // Only boost construction priority if we already have a repairer
+                    if (hasRepairer && counts.builder < 2) {
+                        priority.deficit *= 1.3; // Boost priority for additional builders when we have construction
+                    }
                 }
                 
-                // Boost priority if there are repair targets
-                if (repairTargets > 0) {
-                    priority.deficit *= 1.2; // Increase priority for repairs
+                // Boost priority if there are repair targets and no repairer
+                if (repairTargets > 0 && !hasRepairer) {
+                    priority.deficit *= 1.5; // Higher increase for repairs when no repairer exists
                 }
             }
             
@@ -279,9 +291,18 @@ const spawnManager = {
         });
         
         if (result === OK) {
-            // Special message for builders when there are no construction sites (repair-focused)
-            if (role === 'builder' && spawn.room.find(FIND_CONSTRUCTION_SITES).length === 0) {
-                console.log(`Spawning repair-focused ${role}: ${body.length} parts`);
+            // Check if this is the first builder (will become a repairer)
+            const isFirstBuilder = role === 'builder' && 
+                !_.some(Game.creeps, c => 
+                    c.memory.role === 'builder' && 
+                    c.memory.homeRoom === spawn.room.name && 
+                    c.id !== Game.creeps[name].id
+                );
+            
+            if (isFirstBuilder) {
+                console.log(`Spawning dedicated repairer: ${body.length} parts`);
+            } else if (role === 'builder') {
+                console.log(`Spawning builder: ${body.length} parts`);
             } else {
                 console.log(`Spawning ${role}: ${body.length} parts`);
             }

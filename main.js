@@ -259,6 +259,46 @@ global.analyzeTraffic = function(roomName) {
     return output;
 };
 
+// Global function to check builder/repairer status
+global.checkBuilders = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const builders = _.filter(Game.creeps, c => 
+        c.memory.role === 'builder' && 
+        c.memory.homeRoom === roomName
+    );
+    
+    const repairers = builders.filter(c => c.memory.isRepairer === true);
+    const constructors = builders.filter(c => c.memory.isRepairer === false);
+    
+    let output = `Builder Status for Room ${roomName}:\n`;
+    output += `Total builders: ${builders.length}\n`;
+    output += `- Repairers: ${repairers.length}\n`;
+    output += `- Constructors: ${constructors.length}\n\n`;
+    
+    // Show repair targets
+    const repairTargets = room.find(FIND_STRUCTURES, {
+        filter: s => s.hits < s.hitsMax * 0.5 && 
+                  s.hits < 10000 && 
+                  (s.structureType === STRUCTURE_CONTAINER || 
+                   s.structureType === STRUCTURE_SPAWN ||
+                   s.structureType === STRUCTURE_EXTENSION ||
+                   s.structureType === STRUCTURE_TOWER ||
+                   s.structureType === STRUCTURE_ROAD)
+    });
+    
+    output += `Repair targets: ${repairTargets.length}\n`;
+    
+    // Show construction sites
+    const sites = room.find(FIND_CONSTRUCTION_SITES);
+    output += `Construction sites: ${sites.length}\n`;
+    
+    return output;
+};
+
 // Global function to show creep counts and limits
 global.showCreeps = function(roomName) {
     const room = Game.rooms[roomName];
