@@ -214,23 +214,56 @@ const utils = {
             return true;
         }
         
+        // Get recovery manager if available
+        const recoveryManager = require('recoveryManager');
+        
         // In emergency mode, only run critical operations
         if (global.emergencyMode) {
             let result;
+            
             // Check if we're in recovery mode (after pixel generation)
             const isRecovery = global.emergencyMode.isRecovery === true;
             
+            // Get recovery factor if available
+            const recoveryFactor = global.emergencyMode.recoveryFactor || 0.5;
+            
+            // Check if CPU usage is very low
+            const veryLowCpuUsage = global.cpuHistory && 
+                                  global.cpuHistory.length > 0 && 
+                                  global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
+            
             if (global.emergencyMode.level === 'critical') {
-                // In critical mode, only run critical tasks
-                // During recovery, also allow high priority tasks if bucket is above 400
-                result = priority === 'critical' || 
-                        (isRecovery && priority === 'high' && Game.cpu.bucket > 400);
+                // In critical mode, use adaptive thresholds based on recovery factor
+                if (priority === 'critical') {
+                    result = true; // Always run critical tasks
+                } else if (priority === 'high') {
+                    // For high priority, check recovery factor and bucket
+                    const minBucket = isRecovery ? Math.max(100, 500 * recoveryFactor) : 500;
+                    result = (isRecovery && recoveryFactor > 0.3 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 300);
+                } else {
+                    // For medium/low priority, be very strict
+                    const minBucket = isRecovery ? Math.max(300, 1000 * recoveryFactor) : 1000;
+                    result = (isRecovery && recoveryFactor > 0.7 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 500);
+                }
             } else {
-                // In high emergency mode, run critical and high priority tasks
-                // During recovery, also allow medium priority tasks if bucket is above 1000
-                result = ['critical', 'high'].includes(priority) || 
-                        (isRecovery && priority === 'medium' && Game.cpu.bucket > 1000);
+                // In high emergency mode, be more lenient
+                if (['critical', 'high'].includes(priority)) {
+                    result = true; // Always run critical and high tasks
+                } else if (priority === 'medium') {
+                    // For medium priority, check recovery factor and bucket
+                    const minBucket = isRecovery ? Math.max(200, 800 * recoveryFactor) : 800;
+                    result = (isRecovery && recoveryFactor > 0.4 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 400);
+                } else {
+                    // For low priority, be more strict
+                    const minBucket = isRecovery ? Math.max(500, 1500 * recoveryFactor) : 1500;
+                    result = (isRecovery && recoveryFactor > 0.6 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 800);
+                }
             }
+            
             this.cache[cacheKey] = result;
             return result;
         }
@@ -239,21 +272,36 @@ const utils = {
         const bucket = Game.cpu.bucket;
         let result;
         
-        // Check if we're in post-pixel recovery period (but not in emergency mode)
-        const inRecoveryPeriod = global.lastPixelGeneration && 
-                                (Game.time - global.lastPixelGeneration < 1000);
+        // Check if we're in recovery mode (but not in emergency mode)
+        const inRecoveryPeriod = recoveryManager && recoveryManager.isRecovering;
+        const recoveryFactor = recoveryManager ? recoveryManager.getRecoveryFactor() : 1.0;
+        
+        // Check if CPU usage is very low
+        const veryLowCpuUsage = global.cpuHistory && 
+                              global.cpuHistory.length > 0 && 
+                              global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
         
         if (inRecoveryPeriod) {
-            // More lenient thresholds during recovery period
-            if (bucket < 500) result = priority === 'critical';
+            // Use adaptive thresholds based on recovery factor
+            if (priority === 'critical') {
+                result = true; // Always run critical tasks
+            } else if (priority === 'high') {
+                result = recoveryFactor > 0.3 || bucket > Math.max(300, 800 * recoveryFactor);
+            } else if (priority === 'medium') {
+                result = recoveryFactor > 0.5 || bucket > Math.max(500, 1500 * recoveryFactor);
+            } else {
+                result = recoveryFactor > 0.7 || bucket > Math.max(800, 3000 * recoveryFactor);
+            }
+        } else if (veryLowCpuUsage) {
+            // Even more lenient when CPU usage is very low
+            if (bucket < 200) result = priority === 'critical';
+            else if (bucket < 400) result = ['critical', 'high'].includes(priority);
+            else result = true; // Run everything when CPU usage is very low and bucket is above 400
+        } else {
+            // Standard thresholds - also made more lenient
+            if (bucket < 800) result = priority === 'critical';
             else if (bucket < 2000) result = ['critical', 'high'].includes(priority);
             else if (bucket < 5000) result = !['low'].includes(priority);
-            else result = true;
-        } else {
-            // Standard thresholds
-            if (bucket < 1000) result = priority === 'critical';
-            else if (bucket < 3000) result = ['critical', 'high'].includes(priority);
-            else if (bucket < 7000) result = !['low'].includes(priority);
             else result = true; // Full bucket, run everything
         }
         

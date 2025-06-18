@@ -11,6 +11,7 @@ const constructionManager = require('constructionManager');
 const defenseManager = require('defenseManager');
 const remoteManager = require('remoteManager');
 const movementManager = require('movementManager');
+const recoveryManager = require('recoveryManager');
 const utils = require('utils');
 
 // Global performance tracking
@@ -145,22 +146,64 @@ global.toggleTrafficVisualization = function() {
 
 // Global function to check CPU recovery status
 global.checkRecovery = function() {
-    const inRecoveryPeriod = global.lastPixelGeneration && 
-                           (Game.time - global.lastPixelGeneration < 1000);
-    const timeSincePixel = global.lastPixelGeneration ? 
-                          Game.time - global.lastPixelGeneration : 'never';
+    // Get detailed status from recovery manager
+    const status = recoveryManager.getStatus();
     
-    return {
-        lastPixelGeneration: global.lastPixelGeneration || 'never',
-        timeSincePixel: timeSincePixel,
-        inRecoveryPeriod: inRecoveryPeriod,
-        currentBucket: Game.cpu.bucket,
-        emergencyMode: global.emergencyMode ? {
-            level: global.emergencyMode.level,
-            isRecovery: global.emergencyMode.isRecovery,
-            duration: Game.time - global.emergencyMode.startTime
-        } : 'off'
-    };
+    let output = status;
+    
+    // Add emergency mode info
+    if (global.emergencyMode) {
+        output += `\nEmergency Mode:\n`;
+        output += `- Level: ${global.emergencyMode.level}\n`;
+        output += `- Type: ${global.emergencyMode.isRecovery ? 'adaptive recovery' : 'normal'}\n`;
+        output += `- Duration: ${Game.time - global.emergencyMode.startTime} ticks\n`;
+        output += `- Recovery Factor: ${global.emergencyMode.recoveryFactor ? 
+                 (global.emergencyMode.recoveryFactor * 100).toFixed(0) : 'N/A'}%\n`;
+    } else {
+        output += `\nEmergency Mode: off\n`;
+    }
+    
+    // Add CPU usage info
+    const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ? 
+                      global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 0;
+    
+    output += `\nCPU Usage:\n`;
+    output += `- Current: ${Game.cpu.getUsed().toFixed(2)}\n`;
+    output += `- Average: ${(avgCpuUsage * 100).toFixed(1)}%\n`;
+    output += `- Limit: ${Game.cpu.limit}\n`;
+    
+    return output;
+};
+
+// Global function to control recovery manager
+global.setRecovery = function(action, value) {
+    const recoveryManager = require('recoveryManager');
+    
+    switch(action) {
+        case 'start':
+            recoveryManager.startRecovery(Game.cpu.bucket);
+            return `Started manual recovery at bucket ${Game.cpu.bucket}`;
+        
+        case 'stop':
+            if (recoveryManager.isRecovering) {
+                const duration = Game.time - recoveryManager.recoveryStartTime;
+                recoveryManager.isRecovering = false;
+                return `Stopped recovery after ${duration} ticks`;
+            } else {
+                return `Not in recovery mode`;
+            }
+            
+        case 'rate':
+            if (!isNaN(value)) {
+                recoveryManager.recoveryRate = Number(value);
+                return `Set recovery rate to ${value}`;
+            } else {
+                return `Current recovery rate: ${recoveryManager.recoveryRate}`;
+            }
+            
+        default:
+            return `Unknown action. Use: start, stop, or rate`;
+    }
 };
 
 // Global function to analyze traffic in a room
@@ -440,14 +483,33 @@ module.exports.loop = function() {
         const roomOffset = roomHash % 5; // Distribute across 5 ticks
         
         // Handle spawning logic - throttle based on available CPU and distribute by room
-        if (Game.cpu.bucket > 1000 || (currentTick + roomOffset) % 3 === 0) {
+        // Use adaptive thresholds based on recovery factor
+        const recoveryFactor = recoveryManager.getRecoveryFactor();
+        const spawnThreshold = recoveryManager.isRecovering ? 
+                             Math.max(300, 800 * recoveryFactor) : 800;
+        
+        // Check if this operation should run based on recovery status
+        const shouldRunSpawning = !recoveryManager.isRecovering || 
+                                recoveryManager.shouldRun('high');
+        
+        if ((shouldRunSpawning && Game.cpu.bucket > spawnThreshold) || 
+            (currentTick + roomOffset) % 3 === 0) {
             const spawnStart = Game.cpu.getUsed();
             spawnManager.run(room);
             global.stats.cpu.spawning += Game.cpu.getUsed() - spawnStart;
         }
         
         // Handle construction planning - run periodically and distribute by room
-        if (Game.cpu.bucket > 1000 || (currentTick + roomOffset) % 5 === 0) {
+        // Use adaptive thresholds based on recovery factor
+        const constructionThreshold = recoveryManager.isRecovering ? 
+                                    Math.max(500, 800 * recoveryFactor) : 800;
+        
+        // Check if this operation should run based on recovery status
+        const shouldRunConstruction = !recoveryManager.isRecovering || 
+                                    recoveryManager.shouldRun('medium');
+        
+        if ((shouldRunConstruction && Game.cpu.bucket > constructionThreshold) || 
+            (currentTick + roomOffset) % 5 === 0) {
             const constructionStart = Game.cpu.getUsed();
             try {
                 constructionManager.run(room);
@@ -647,25 +709,16 @@ module.exports.loop = function() {
     // Calculate average CPU usage over last 10 ticks
     const avgCpuUsage = global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length;
     
-    // Track if we recently generated a pixel
-    if (!global.lastPixelGeneration) global.lastPixelGeneration = 0;
+    // Update recovery manager
+    recoveryManager.update();
     
-    // Check if pixel was just generated (bucket dropped from 10000)
-    if (Game.cpu.bucket < 9000 && global.previousBucket === 10000) {
-        global.lastPixelGeneration = Game.time;
-        console.log(`Pixel generation detected at tick ${Game.time}`);
-    }
+    // Use recovery manager to determine if we're in recovery mode
+    const inRecoveryPeriod = recoveryManager.isRecovering;
     
-    // Store current bucket for next tick comparison
-    global.previousBucket = Game.cpu.bucket;
-    
-    // Calculate time since last pixel generation
-    const timeSincePixel = Game.time - global.lastPixelGeneration;
-    
-    // Enter emergency mode if CPU usage is consistently high or bucket is critically low
-    // Use more lenient thresholds right after pixel generation
-    const inRecoveryPeriod = timeSincePixel < 1000; // Recovery period of 1000 ticks after pixel generation
-    const bucketThreshold = inRecoveryPeriod ? 500 : 1000; // More lenient threshold during recovery
+    // Get adaptive bucket threshold based on recovery status
+    const recoveryFactor = recoveryManager.getRecoveryFactor();
+    const bucketThreshold = inRecoveryPeriod ? 
+                          Math.max(100, Math.min(800, 800 * (1 - recoveryFactor))) : 800;
     
     if (avgCpuUsage > 0.9 || Game.cpu.bucket < bucketThreshold) {
         if (!global.emergencyMode) {
@@ -673,17 +726,30 @@ module.exports.loop = function() {
                 active: true,
                 startTime: Game.time,
                 level: Game.cpu.bucket < 300 ? 'critical' : 'high',
-                isRecovery: inRecoveryPeriod
+                isRecovery: inRecoveryPeriod,
+                recoveryFactor: recoveryFactor
             };
-            console.log(`⚠️ ENTERING ${inRecoveryPeriod ? 'RECOVERY' : 'EMERGENCY'} CPU MODE (${global.emergencyMode.level}): CPU usage ${(avgCpuUsage*100).toFixed(1)}%, bucket ${Game.cpu.bucket}`);
+            console.log(`⚠️ ENTERING ${inRecoveryPeriod ? 'ADAPTIVE RECOVERY' : 'EMERGENCY'} CPU MODE (${global.emergencyMode.level}): CPU usage ${(avgCpuUsage*100).toFixed(1)}%, bucket ${Game.cpu.bucket}`);
+        } else {
+            // Update recovery factor in emergency mode
+            global.emergencyMode.recoveryFactor = recoveryFactor;
         }
     } else if (global.emergencyMode) {
-        // Exit conditions - more lenient during recovery period
-        const exitBucketThreshold = inRecoveryPeriod ? 2000 : 3000;
-        const exitCpuThreshold = inRecoveryPeriod ? 0.8 : 0.7;
+        // Use adaptive exit conditions based on recovery factor
+        const exitBucketThreshold = inRecoveryPeriod ? 
+                                  Math.max(800, 2000 * recoveryFactor) : 2000;
+        const exitCpuThreshold = inRecoveryPeriod ? 
+                               Math.min(0.9, 0.7 + (0.2 * recoveryFactor)) : 0.8;
         
-        if (avgCpuUsage < exitCpuThreshold && Game.cpu.bucket > exitBucketThreshold) {
-            console.log(`✓ Exiting ${global.emergencyMode.isRecovery ? 'recovery' : 'emergency'} CPU mode after ${Game.time - global.emergencyMode.startTime} ticks`);
+        // Exit emergency mode faster if CPU usage is very low
+        const veryLowCpuUsage = avgCpuUsage < 0.3;
+        const fastExitBucketThreshold = inRecoveryPeriod ? 
+                                      Math.max(500, 800 * recoveryFactor) : 800;
+        
+        if ((avgCpuUsage < exitCpuThreshold && Game.cpu.bucket > exitBucketThreshold) || 
+            (veryLowCpuUsage && Game.cpu.bucket > fastExitBucketThreshold)) {
+            console.log(`✓ Exiting ${global.emergencyMode.isRecovery ? 'adaptive recovery' : 'emergency'} CPU mode after ${Game.time - global.emergencyMode.startTime} ticks`);
+            console.log(`Final recovery factor: ${(recoveryFactor * 100).toFixed(0)}%, bucket: ${Game.cpu.bucket}, CPU usage: ${(avgCpuUsage*100).toFixed(1)}%`);
             global.emergencyMode = null;
         }
     }
