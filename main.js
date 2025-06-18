@@ -10,6 +10,7 @@ const spawnManager = require('spawnManager');
 const constructionManager = require('constructionManager');
 const defenseManager = require('defenseManager');
 const remoteManager = require('remoteManager');
+const movementManager = require('movementManager');
 const utils = require('utils');
 
 // Global performance tracking
@@ -129,6 +130,17 @@ global.setCreepLimits = function(roomName, role, limit) {
     console.log(`Set ${role} limit for room ${roomName} to ${limit}`);
     
     return `Set ${role} limit for room ${roomName} to ${limit}`;
+};
+
+// Global function to toggle traffic visualization
+global.toggleTrafficVisualization = function() {
+    if (!Memory.visualizeTraffic) {
+        Memory.visualizeTraffic = true;
+        return "Traffic visualization enabled";
+    } else {
+        Memory.visualizeTraffic = false;
+        return "Traffic visualization disabled";
+    }
 };
 
 // Global function to show creep counts and limits
@@ -308,6 +320,16 @@ module.exports.loop = function() {
         }
         
         global.stats.cpu.memoryCleanup = Game.cpu.getUsed() - memStart;
+    }
+    
+    // Reset creep movement tracking for this tick
+    for (const name in Game.creeps) {
+        delete Game.creeps[name]._moved;
+    }
+    
+    // Clean movement cache periodically
+    if (currentTick % 100 === 0) {
+        movementManager.cleanCache();
     }
     
     // Process each room we control - distribute CPU load across ticks
@@ -504,6 +526,36 @@ module.exports.loop = function() {
     processCreepRole(creepsByRole.builder, roleBuilder, 'low');
     
     global.stats.cpu.creepActions = Game.cpu.getUsed() - creepStart;
+    
+    // Visualize traffic if enabled
+    if (Memory.visualizeTraffic) {
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            const visual = room.visual;
+            
+            // Get all creeps in the room
+            const creeps = room.find(FIND_MY_CREEPS);
+            
+            // Create a heatmap of creep positions
+            const heatmap = {};
+            
+            for (const creep of creeps) {
+                const key = `${creep.pos.x},${creep.pos.y}`;
+                heatmap[key] = (heatmap[key] || 0) + 1;
+            }
+            
+            // Visualize the heatmap
+            for (const key in heatmap) {
+                const [x, y] = key.split(',').map(Number);
+                const intensity = Math.min(heatmap[key] * 0.2, 1);
+                visual.circle(x, y, {
+                    radius: 0.5,
+                    fill: `rgba(255, 0, 0, ${intensity})`,
+                    opacity: 0.5
+                });
+            }
+        }
+    }
     
     // Update CPU statistics
     const totalCpuUsed = Game.cpu.getUsed() - cpuStart;

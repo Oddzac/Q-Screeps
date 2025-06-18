@@ -11,6 +11,7 @@ const roleHarvester = {
      */
     run: function(creep) {
         const utils = require('utils');
+        const movementManager = require('movementManager');
         
         // If creep is dying, release its source
         if (creep.ticksToLive < 30 && creep.memory.sourceId) {
@@ -76,11 +77,13 @@ const roleHarvester = {
                     
                     if (creep.memory.idlePos) {
                         try {
-                            creep.moveTo(new RoomPosition(
+                            const movementManager = require('movementManager');
+                            const idlePos = new RoomPosition(
                                 creep.memory.idlePos.x,
                                 creep.memory.idlePos.y,
                                 creep.memory.idlePos.roomName
-                            ), { reusePath: 20 });
+                            );
+                            movementManager.moveToTarget(creep, idlePos, { reusePath: 20 });
                         } catch (e) {
                             // If movement fails, try to move to spawn directly
                             const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
@@ -171,6 +174,12 @@ const roleHarvester = {
             }
         }
         
+        // Check if we need to move aside for other creeps
+        if (creep.store.getFreeCapacity() === 0) {
+            // If we're full, check if we're blocking other creeps
+            movementManager.checkAndGiveWay(creep);
+        }
+        
         // Move to source and harvest
         const harvestResult = creep.harvest(source);
         if (harvestResult === ERR_NOT_IN_RANGE) {
@@ -182,12 +191,14 @@ const roleHarvester = {
                     creep.memory.sourcePos.roomName
                 );
                 
-                creep.moveTo(targetPos, { 
+                const movementManager = require('movementManager');
+                movementManager.moveToTarget(creep, targetPos, { 
                     reusePath: 30, // Reuse path for longer since harvesters are static
                     visualizePathStyle: {stroke: '#ffaa00'}
                 });
             } else {
-                creep.moveTo(source, { 
+                const movementManager = require('movementManager');
+                movementManager.moveToTarget(creep, source, { 
                     reusePath: 30,
                     visualizePathStyle: {stroke: '#ffaa00'}
                 });
@@ -236,12 +247,14 @@ const roleHarvester = {
         
         if (target) {
             if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(target, { reusePath: 10 });
+                const movementManager = require('movementManager');
+                movementManager.moveToTarget(creep, target, { reusePath: 10 });
             }
         } else {
             // If no structures need energy, upgrade controller
             if (creep.upgradeController(creep.room.controller) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(creep.room.controller, { reusePath: 10 });
+                const movementManager = require('movementManager');
+                movementManager.moveToTarget(creep, creep.room.controller, { reusePath: 10 });
             }
         }
     }
