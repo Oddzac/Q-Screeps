@@ -969,7 +969,18 @@ const constructionManagerImpl = {
             MAX_GLOBAL_SITES - globalSiteCount
         );
         
+        // Track what types of construction sites we already have
+        const existingSiteTypes = {};
+        for (const site of existingSites) {
+            existingSiteTypes[site.structureType] = (existingSiteTypes[site.structureType] || 0) + 1;
+        }
+        
         console.log(`Room ${room.name} has ${existingSites.length} construction sites, creating ${sitesToPlace} more to reach target of ${TARGET_SITES_PER_ROOM}`);
+        
+        // Determine if we should prioritize non-road structures
+        // If we already have mostly road construction sites, prioritize other structures
+        const roadSites = existingSiteTypes[STRUCTURE_ROAD] || 0;
+        const prioritizeNonRoads = roadSites > 0 && roadSites / existingSites.length > 0.5;
         let sitesPlaced = 0;
         
         // Create a map of existing structures for faster lookups
@@ -987,100 +998,112 @@ const constructionManagerImpl = {
             siteMap.set(key, true);
         }
         
-        // Create container construction sites first (highest priority)
-        if (room.memory.construction && room.memory.construction.containers && 
-            room.memory.construction.containers.planned && 
-            room.memory.construction.containers.positions) {
+        // Define the order of structure creation based on our prioritization logic
+        const structureOrder = prioritizeNonRoads ? 
+            ['containers', 'extensions', 'towers', 'storage', 'roads'] : 
+            ['containers', 'extensions', 'roads', 'towers', 'storage'];
             
-            const containerPositions = room.memory.construction.containers.positions;
-            const newContainerPositions = [];
+        // Process each structure type in order
+        for (const structureType of structureOrder) {
+            // Skip if we've placed enough sites
+            if (sitesPlaced >= sitesToPlace) break;
             
-            for (let i = 0; i < containerPositions.length && sitesPlaced < sitesToPlace; i++) {
-                const pos = containerPositions[i];
+            // Create container construction sites
+            if (structureType === 'containers' && 
+                room.memory.construction && room.memory.construction.containers && 
+                room.memory.construction.containers.planned && 
+                room.memory.construction.containers.positions) {
                 
-                // Check if there's already a container or construction site here
-                const containerKey = `${pos.x},${pos.y},${STRUCTURE_CONTAINER}`;
-                const hasContainer = structureMap.has(containerKey);
-                const hasContainerSite = siteMap.has(containerKey);
+                const containerPositions = room.memory.construction.containers.positions;
+                const newContainerPositions = [];
                 
-                // Create container construction site if needed
-                if (!hasContainer && !hasContainerSite) {
-                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
-                    if (result === OK) {
-                        sitesPlaced++;
-                        console.log(`Created container construction site at (${pos.x},${pos.y})`);
-                        
-                        // Add to site map to prevent duplicates
-                        siteMap.set(containerKey, true);
-                    }
-                }
-                
-                // Keep this position in the plan if container doesn't exist yet
-                if (!hasContainer) {
-                    newContainerPositions.push(pos);
-                }
-            }
-            
-            // Update container positions in memory
-            room.memory.construction.containers.positions = newContainerPositions;
-        }
-        
-        // Create extension construction sites next (second priority)
-        if (room.controller.level >= 2 && room.memory.construction && 
-            room.memory.construction.extensions && 
-            room.memory.construction.extensions.planned && 
-            room.memory.construction.extensions.positions && sitesPlaced < sitesToPlace) {
-            
-            const extensionPositions = room.memory.construction.extensions.positions;
-            const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level];
-            const currentExtensions = room.memory.construction.extensions.count || 0;
-            const newExtensionPositions = [];
-            
-            // Only create extensions if we haven't reached the limit
-            if (currentExtensions < maxExtensions) {
-                let newExtensionsCount = 0;
-                
-                for (let i = 0; i < extensionPositions.length && sitesPlaced < sitesToPlace; i++) {
-                    const pos = extensionPositions[i];
+                for (let i = 0; i < containerPositions.length && sitesPlaced < sitesToPlace; i++) {
+                    const pos = containerPositions[i];
                     
-                    // Check if there's already an extension or construction site here
-                    const extensionKey = `${pos.x},${pos.y},${STRUCTURE_EXTENSION}`;
-                    const hasExtension = structureMap.has(extensionKey);
-                    const hasExtensionSite = siteMap.has(extensionKey);
+                    // Check if there's already a container or construction site here
+                    const containerKey = `${pos.x},${pos.y},${STRUCTURE_CONTAINER}`;
+                    const hasContainer = structureMap.has(containerKey);
+                    const hasContainerSite = siteMap.has(containerKey);
                     
-                    // Create extension construction site if needed
-                    if (!hasExtension && !hasExtensionSite && currentExtensions + newExtensionsCount < maxExtensions) {
-                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                    // Create container construction site if needed
+                    if (!hasContainer && !hasContainerSite) {
+                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
                         if (result === OK) {
                             sitesPlaced++;
-                            newExtensionsCount++;
-                            console.log(`Created extension construction site at (${pos.x},${pos.y})`);
+                            console.log(`Created container construction site at (${pos.x},${pos.y})`);
                             
                             // Add to site map to prevent duplicates
-                            siteMap.set(extensionKey, true);
+                            siteMap.set(containerKey, true);
                         }
                     }
                     
-                    // Keep this position in the plan if extension doesn't exist yet
-                    if (!hasExtension) {
-                        newExtensionPositions.push(pos);
-                    } else {
-                        room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
+                    // Keep this position in the plan if container doesn't exist yet
+                    if (!hasContainer) {
+                        newContainerPositions.push(pos);
                     }
                 }
                 
-                // Update extension positions in memory
-                room.memory.construction.extensions.positions = newExtensionPositions;
+                // Update container positions in memory
+                room.memory.construction.containers.positions = newContainerPositions;
             }
-        }
-        
-        // Create road construction sites after containers and extensions (third priority)
+            
+            // Create extension construction sites
+            else if (structureType === 'extensions' && 
+                room.controller.level >= 2 && room.memory.construction && 
+                room.memory.construction.extensions && 
+                room.memory.construction.extensions.planned && 
+                room.memory.construction.extensions.positions && sitesPlaced < sitesToPlace) {
+                
+                const extensionPositions = room.memory.construction.extensions.positions;
+                const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level];
+                const currentExtensions = room.memory.construction.extensions.count || 0;
+                const newExtensionPositions = [];
+                
+                // Only create extensions if we haven't reached the limit
+                if (currentExtensions < maxExtensions) {
+                    let newExtensionsCount = 0;
+                    
+                    for (let i = 0; i < extensionPositions.length && sitesPlaced < sitesToPlace; i++) {
+                        const pos = extensionPositions[i];
+                        
+                        // Check if there's already an extension or construction site here
+                        const extensionKey = `${pos.x},${pos.y},${STRUCTURE_EXTENSION}`;
+                        const hasExtension = structureMap.has(extensionKey);
+                        const hasExtensionSite = siteMap.has(extensionKey);
+                        
+                        // Create extension construction site if needed
+                        if (!hasExtension && !hasExtensionSite && currentExtensions + newExtensionsCount < maxExtensions) {
+                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                            if (result === OK) {
+                                sitesPlaced++;
+                                newExtensionsCount++;
+                                console.log(`Created extension construction site at (${pos.x},${pos.y})`);
+                                
+                                // Add to site map to prevent duplicates
+                                siteMap.set(extensionKey, true);
+                            }
+                        }
+                        
+                        // Keep this position in the plan if extension doesn't exist yet
+                        if (!hasExtension) {
+                            newExtensionPositions.push(pos);
+                        } else {
+                            room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
+                        }
+                    }
+                    
+                    // Update extension positions in memory
+                    room.memory.construction.extensions.positions = newExtensionPositions;
+                }
+            }
+            
+            // Create road construction sites
         if (room.memory.construction && room.memory.construction.roads && 
             room.memory.construction.roads.planned && 
             room.memory.construction.roads.positions && sitesPlaced < sitesToPlace) {
             
             const roadPositions = room.memory.construction.roads.positions;
-            const newRoadPositions = [];
+            let newRoadPositions = [];
             
             // Log the number of road positions to process
             console.log(`Processing ${roadPositions.length} road positions in room ${room.name}`);
@@ -1088,8 +1111,20 @@ const constructionManagerImpl = {
             // Track how many positions we've checked
             let positionsChecked = 0;
             let positionsSkipped = 0;
+            let sitesPlacedForRoads = 0;
             
-            for (let i = 0; i < roadPositions.length && sitesPlaced < sitesToPlace; i++) {
+            // Process a limited number of road positions per tick to avoid getting stuck
+            // This ensures we'll move on to other structure types even if roads can't be placed
+            const MAX_ROAD_POSITIONS_TO_CHECK = 20;
+            const startIndex = room.memory.construction.roadIndex || 0;
+            const endIndex = Math.min(startIndex + MAX_ROAD_POSITIONS_TO_CHECK, roadPositions.length);
+            
+            // Keep all positions before the ones we're checking
+            if (startIndex > 0) {
+                newRoadPositions = roadPositions.slice(0, startIndex);
+            }
+            
+            for (let i = startIndex; i < endIndex && sitesPlaced < sitesToPlace; i++) {
                 positionsChecked++;
                 const pos = roadPositions[i];
                 
@@ -1141,6 +1176,7 @@ const constructionManagerImpl = {
                     const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
                     if (result === OK) {
                         sitesPlaced++;
+                        sitesPlacedForRoads++;
                         console.log(`Created road construction site at (${pos.x},${pos.y})`);
                         
                         // Add to site map to prevent duplicates
@@ -1166,79 +1202,101 @@ const constructionManagerImpl = {
                 newRoadPositions.push(pos);
             }
             
+            // Add remaining positions that we didn't check yet
+            if (endIndex < roadPositions.length) {
+                newRoadPositions = newRoadPositions.concat(roadPositions.slice(endIndex));
+            }
+            
+            // Update the index for next time
+            if (endIndex >= roadPositions.length) {
+                // We've processed all road positions, reset the index
+                room.memory.construction.roadIndex = 0;
+            } else {
+                // Save where we left off
+                room.memory.construction.roadIndex = endIndex;
+            }
+            
             // Log summary
-            console.log(`Road positions: ${positionsChecked} checked, ${positionsSkipped} skipped, ${sitesPlaced} sites placed`);
+            console.log(`Road positions: ${positionsChecked} checked, ${positionsSkipped} skipped, ${sitesPlacedForRoads} sites placed`);
             
             // Update road positions in memory
             room.memory.construction.roads.positions = newRoadPositions;
+            
+            // If we placed some road sites but haven't reached our target,
+            // we'll continue with other structure types
         }
         
         // Extensions are now created before roads
         
-        // Create tower construction sites if we have capacity
-        if (room.controller.level >= 3 && room.memory.construction && 
-            room.memory.construction.towers && 
-            room.memory.construction.towers.planned && 
-            room.memory.construction.towers.positions) {
-            
-            const towerPositions = room.memory.construction.towers.positions;
-            const maxTowers = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level];
-            const currentTowers = room.memory.construction.towers.count || 0;
-            const newTowerPositions = [];
-            
-            // Only create towers if we haven't reached the limit
-            if (currentTowers < maxTowers) {
-                let newTowersCount = 0;
+            // Create tower construction sites
+            else if (structureType === 'towers' && 
+                room.controller.level >= 3 && room.memory.construction && 
+                room.memory.construction.towers && 
+                room.memory.construction.towers.planned && 
+                room.memory.construction.towers.positions && sitesPlaced < sitesToPlace) {
                 
-                for (let i = 0; i < towerPositions.length && sitesPlaced < sitesToPlace; i++) {
-                    const pos = towerPositions[i];
+                const towerPositions = room.memory.construction.towers.positions;
+                const maxTowers = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level];
+                const currentTowers = room.memory.construction.towers.count || 0;
+                const newTowerPositions = [];
+                
+                // Only create towers if we haven't reached the limit
+                if (currentTowers < maxTowers) {
+                    let newTowersCount = 0;
                     
-                    // Check if there's already a tower or construction site here
-                    const towerKey = `${pos.x},${pos.y},${STRUCTURE_TOWER}`;
-                    const hasTower = structureMap.has(towerKey);
-                    const hasTowerSite = siteMap.has(towerKey);
-                    
-                    // Create tower construction site if needed
-                    if (!hasTower && !hasTowerSite && currentTowers + newTowersCount < maxTowers) {
-                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
-                        if (result === OK) {
-                            sitesPlaced++;
-                            newTowersCount++;
+                    for (let i = 0; i < towerPositions.length && sitesPlaced < sitesToPlace; i++) {
+                        const pos = towerPositions[i];
+                        
+                        // Check if there's already a tower or construction site here
+                        const towerKey = `${pos.x},${pos.y},${STRUCTURE_TOWER}`;
+                        const hasTower = structureMap.has(towerKey);
+                        const hasTowerSite = siteMap.has(towerKey);
+                        
+                        // Create tower construction site if needed
+                        if (!hasTower && !hasTowerSite && currentTowers + newTowersCount < maxTowers) {
+                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
+                            if (result === OK) {
+                                sitesPlaced++;
+                                newTowersCount++;
+                                console.log(`Created tower construction site at (${pos.x},${pos.y})`);
+                            }
+                        }
+                        
+                        // Keep this position in the plan if tower doesn't exist yet
+                        if (!hasTower) {
+                            newTowerPositions.push(pos);
+                        } else {
+                            room.memory.construction.towers.count = (room.memory.construction.towers.count || 0) + 1;
                         }
                     }
                     
-                    // Keep this position in the plan if tower doesn't exist yet
-                    if (!hasTower) {
-                        newTowerPositions.push(pos);
-                    } else {
-                        room.memory.construction.towers.count = (room.memory.construction.towers.count || 0) + 1;
-                    }
+                    // Update tower positions in memory
+                    room.memory.construction.towers.positions = newTowerPositions;
                 }
-                
-                // Update tower positions in memory
-                room.memory.construction.towers.positions = newTowerPositions;
             }
-        }
-        
-        // Create storage construction site if we have capacity
-        if (room.controller.level >= 4 && room.memory.construction && 
-            room.memory.construction.storage && 
-            room.memory.construction.storage.planned && 
-            room.memory.construction.storage.position && 
-            sitesPlaced < sitesToPlace) {
             
-            const pos = room.memory.construction.storage.position;
-            
-            // Check if there's already a storage or construction site here
-            const storageKey = `${pos.x},${pos.y},${STRUCTURE_STORAGE}`;
-            const hasStorage = structureMap.has(storageKey);
-            const hasStorageSite = siteMap.has(storageKey);
-            
-            // Create storage construction site if needed
-            if (!hasStorage && !hasStorageSite && !room.storage) {
-                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
-                if (result === OK) {
-                    sitesPlaced++;
+            // Create storage construction site
+            else if (structureType === 'storage' && 
+                room.controller.level >= 4 && room.memory.construction && 
+                room.memory.construction.storage && 
+                room.memory.construction.storage.planned && 
+                room.memory.construction.storage.position && 
+                sitesPlaced < sitesToPlace) {
+                
+                const pos = room.memory.construction.storage.position;
+                
+                // Check if there's already a storage or construction site here
+                const storageKey = `${pos.x},${pos.y},${STRUCTURE_STORAGE}`;
+                const hasStorage = structureMap.has(storageKey);
+                const hasStorageSite = siteMap.has(storageKey);
+                
+                // Create storage construction site if needed
+                if (!hasStorage && !hasStorageSite && !room.storage) {
+                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
+                    if (result === OK) {
+                        sitesPlaced++;
+                        console.log(`Created storage construction site at (${pos.x},${pos.y})`);
+                    }
                 }
             }
         }
