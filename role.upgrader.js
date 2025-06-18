@@ -76,6 +76,23 @@ const roleUpgrader = {
             this.getEnergy(creep);
         }
     },
+
+    /**
+     * Generate a pixel if the CPU bucket is full
+     * @param {Creep} creep - The creep to generate the pixel for
+     */
+    genPix: function() {
+        if (Game.cpu.bucket >= 10000) { // Ensure there is enough CPU in the bucket
+            const result = Game.cpu.generatePixel();
+            if (result === OK) {
+                console.log('Pixel generated successfully!');
+            } else {
+                console.log('Failed to generate pixel:', result);
+            }
+        } else {
+            console.log('Not enough CPU in the bucket to generate a pixel.');
+        }
+    },
     
     /**
      * Get energy from the most efficient source
