@@ -533,18 +533,22 @@ const roomManager = {
         
         const storage = room.storage ? 1 : 0;
         
+        // Calculate approximate energy production per tick
+        const energyPerTick = sourceCount * 10; // Approximate energy per tick
+        
         // Calculate optimal creep counts based on infrastructure
         const result = {
-            harvester: Math.min(sourceCount*2, 2), // Max 2 per source, but at least 2 total
-            hauler: Math.min(Math.max(1, containers), sourceCount + storage), // At least 1, but more if we have containers or storage
+            harvester: Math.min(sourceCount*2, 4), // Allow up to 4 harvesters for rooms with multiple sources
+            hauler: Math.min(Math.ceil(energyPerTick / 50), sourceCount + storage + 1), // Scale with energy production
             upgrader: rcl < 8 ? Math.min(rcl <= 3 ? 1 : 2, 2) : 1, // 1-2 based on RCL
             builder: 0, // Will be calculated based on construction needs
             total: 0
         };
         
-        // Adjust builder count based on construction sites
+        // Adjust builder count based on construction sites - more gradual scaling
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-        result.builder = constructionSites > 0 ? Math.min(3, Math.ceil((constructionSites / 5) + 1)) : 0; // 1 builder per 5 sites + 1 repair, max 3
+        result.builder = constructionSites > 0 ? 
+            Math.min(3, Math.max(1, Math.floor(constructionSites / 5))) : 0;
         
         // Apply manual limits if set
         if (room.memory.creepLimits) {
@@ -569,8 +573,8 @@ const roomManager = {
         if (room.memory.creepLimits && room.memory.creepLimits.total !== undefined) {
             result.total = Math.min(result.total, room.memory.creepLimits.total);
         } else {
-            // Default total limit based on RCL
-            const defaultTotal = rcl <= 2 ? 6 : (rcl <= 4 ? 8 : 10);
+            // More flexible total based on sources and RCL
+            const defaultTotal = Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 10 : 12));
             result.total = Math.min(result.total, defaultTotal);
         }
         

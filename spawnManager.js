@@ -117,11 +117,14 @@ const spawnManager = {
         // Calculate RCL-based values
         const rcl = room.controller.level;
         
-        // Use optimal counts from room analysis, with fallbacks
-        const maxHarvesters = optimalCounts ? optimalCounts.harvester : Math.min(sourceCount*1.5, 4); // At least 1.5 harvesters per source, max 4 total
-        const maxHaulers = optimalCounts ? optimalCounts.hauler : Math.min(sourceCount + 2, 4); // At least 1(+1) hauler per source, max 4 total
+        // Calculate approximate energy production per tick for fallback
+        const energyPerTick = sourceCount * 10;
+        
+        // Use optimal counts from room analysis, with fallbacks aligned with analyzeRoomNeeds
+        const maxHarvesters = optimalCounts ? optimalCounts.harvester : Math.min(sourceCount*2, 4); // Allow up to 4 harvesters for multiple sources
+        const maxHaulers = optimalCounts ? optimalCounts.hauler : Math.min(Math.ceil(energyPerTick / 50), sourceCount + 2); // Scale with energy production
         const maxUpgraders = optimalCounts ? optimalCounts.upgrader : Math.min(2, rcl <= 2 ? 1 : 2); // At least 1 upgrader, max 2 at higher RCL
-        const maxBuilders = optimalCounts ? optimalCounts.builder : (constructionSites > 0 ? Math.min(2, Math.ceil(constructionSites / 5)) : 0); // At least 1 builder if construction exists, max 2 based on sites
+        const maxBuilders = optimalCounts ? optimalCounts.builder : (constructionSites > 0 ? Math.min(3, Math.max(1, Math.floor(constructionSites / 5))) : 0); // More gradual scaling
         
         // Minimum requirements
         const minHarvesters = Math.min(maxHarvesters, 1); // At least 1 harvester
@@ -129,9 +132,8 @@ const spawnManager = {
         const minUpgraders = Math.min(maxUpgraders, 1); // At least 1 upgrader
         const minBuilders = constructionSites > 0 ? Math.min(maxBuilders, 1) : 0; // At least 1 builder if construction exists
         
-        // Total creep cap based on RCL - strict limits
-
-        const maxTotalCreeps = optimalCounts ? optimalCounts.total : (rcl <= 2 ? 6 : (rcl <= 4 ? 8 : 10)); 
+        // Total creep cap based on RCL - more flexible limits
+        const maxTotalCreeps = optimalCounts ? optimalCounts.total : Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 10 : 12)); 
         
         // Check if we're at total creep capacity - enforce strict limit
         if (counts.total >= maxTotalCreeps) {
