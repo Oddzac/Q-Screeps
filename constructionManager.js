@@ -40,7 +40,7 @@ const constructionManagerImpl = {
         // Run more frequently in simulation rooms
         const interval = isSimulation ? 5 : // Every 5 ticks in simulation
             (global.emergencyMode ? 
-                (global.emergencyMode.level === 'critical' ? 500 : 200) : 100);
+                (global.emergencyMode.level === 'critical' ? 500 : 100) : 25);
             
         if (!force && Game.time % interval !== 0) return;
         
@@ -112,7 +112,7 @@ const constructionManagerImpl = {
         room.memory.construction.lastUpdate = Game.time;
         
         // Log construction status
-        /*
+        
         if (force || Game.time % (isSimulation ? 20 : 100) === 0) {
             console.log(`Construction status for ${room.name}: ` +
                 `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
@@ -120,6 +120,7 @@ const constructionManagerImpl = {
                 `Containers: ${room.memory.construction.containers?.planned ? 'Planned' : 'Not Planned'}, ` +
                 `RCL: ${room.controller.level}`
             );
+            
             
             // In simulation, log more detailed information
             if (isSimulation) {
@@ -130,8 +131,9 @@ const constructionManagerImpl = {
                     `Construction sites: ${room.find(FIND_CONSTRUCTION_SITES).length}`
                 );
             }
+
         }
-        */
+        
     },
     
     /**

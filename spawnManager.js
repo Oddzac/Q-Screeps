@@ -118,10 +118,10 @@ const spawnManager = {
         const rcl = room.controller.level;
         
         // Use optimal counts from room analysis, with fallbacks
-        const maxHarvesters = optimalCounts ? optimalCounts.harvester : Math.min(sourceCount, 2);
-        const maxHaulers = optimalCounts ? optimalCounts.hauler : Math.min(sourceCount + 1, 2);
-        const maxUpgraders = optimalCounts ? optimalCounts.upgrader : Math.min(2, rcl <= 2 ? 1 : 2);
-        const maxBuilders = optimalCounts ? optimalCounts.builder : (constructionSites > 0 ? Math.min(2, Math.ceil(constructionSites / 5)) : 0);
+        const maxHarvesters = optimalCounts ? optimalCounts.harvester : Math.min(sourceCount*1.5, 4); // At least 1.5 harvesters per source, max 4 total
+        const maxHaulers = optimalCounts ? optimalCounts.hauler : Math.min(sourceCount + 1, 4); // At least 1(+1) hauler per source, max 4 total
+        const maxUpgraders = optimalCounts ? optimalCounts.upgrader : Math.min(2, rcl <= 2 ? 1 : 2); // At least 1 upgrader, max 2 at higher RCL
+        const maxBuilders = optimalCounts ? optimalCounts.builder : (constructionSites > 0 ? Math.min(2, Math.ceil(constructionSites / 5)) : 0); // At least 1 builder if construction exists, max 2 based on sites
         
         // Minimum requirements
         const minHarvesters = Math.min(maxHarvesters, 1); // At least 1 harvester
@@ -130,11 +130,11 @@ const spawnManager = {
         const minBuilders = constructionSites > 0 ? Math.min(maxBuilders, 1) : 0; // At least 1 builder if construction exists
         
         // Total creep cap based on RCL - strict limits
-        const maxTotalCreeps = optimalCounts ? optimalCounts.total : (rcl <= 2 ? 6 : (rcl <= 4 ? 8 : 10));
+
+        const maxTotalCreeps = optimalCounts ? optimalCounts.total : (rcl <= 2 ? 6 : (rcl <= 4 ? 8 : 10)); 
         
         // Check if we're at total creep capacity - enforce strict limit
         if (counts.total >= maxTotalCreeps) {
-            console.log(`Room ${room.name} at max creep capacity (${counts.total}/${maxTotalCreeps})`);
             return null;
         }
         
