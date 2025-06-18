@@ -176,14 +176,21 @@ const roleBuilder = {
                     // Track error count for this target
                     creep.memory.errorCount = (creep.memory.errorCount || 0) + 1;
                     
-                    console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target (error #${creep.memory.errorCount})`);
-                    
-                    // If we've had multiple errors with this target, do a full reset
-                    if (creep.memory.errorCount >= 3) {
+                    // Special handling for controller targets
+                    if (target.structureType === STRUCTURE_CONTROLLER) {
+                        console.log(`Builder ${creep.name} has invalid controller target, forcing upgrade mode`);
+                        // Force upgrading mode immediately for controller targets
                         this.resetStuckBuilder(creep);
                     } else {
-                        delete creep.memory.targetId;
-                        delete creep.memory.targetPos;
+                        console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target (error #${creep.memory.errorCount})`);
+                        
+                        // If we've had multiple errors with this target, do a full reset
+                        if (creep.memory.errorCount >= 3) {
+                            this.resetStuckBuilder(creep);
+                        } else {
+                            delete creep.memory.targetId;
+                            delete creep.memory.targetPos;
+                        }
                     }
                 } else if (actionResult !== OK) {
                     // Log errors other than distance
@@ -224,11 +231,27 @@ const roleBuilder = {
     },
     
     /**
+     * Check if a repairer is in forced upgrading mode
+     * @param {Creep} creep - The repairer creep
+     * @returns {boolean} - Whether the repairer is in upgrading mode
+     */
+    isRepairerUpgrading: function(creep) {
+        return creep.memory.isRepairer === true && 
+               creep.memory.forceUpgrade && 
+               Game.time < creep.memory.forceUpgrade;
+    },
+    
+    /**
      * Check if a repairer should help with critical construction
      * @param {Creep} creep - The repairer creep
      * @returns {boolean} - Whether the repairer should help with construction
      */
     shouldRepairerHelpConstruct: function(creep) {
+        // If repairer is in forced upgrading mode, don't help with construction
+        if (this.isRepairerUpgrading(creep)) {
+            return false;
+        }
+        
         // Only check occasionally to save CPU
         if (!creep.memory.lastConstructCheck || Game.time - creep.memory.lastConstructCheck > 50) {
             creep.memory.lastConstructCheck = Game.time;
@@ -276,6 +299,12 @@ const roleBuilder = {
     findBuildTarget: function(creep) {
         const roomManager = require('roomManager');
         let target = null;
+        
+        // Check if creep is forced to upgrade (after being stuck)
+        if (creep.memory.forceUpgrade && Game.time < creep.memory.forceUpgrade) {
+            creep.say('⚡ Upgrade');
+            return creep.room.controller;
+        }
         
         // If this is a repairer, check if it should help with construction
         if (creep.memory.isRepairer === true) {
@@ -362,6 +391,11 @@ const roleBuilder = {
      * @returns {Object} - The repair target or fallback target
      */
     findRepairTarget: function(creep) {
+        // If repairer is in forced upgrading mode, return controller
+        if (this.isRepairerUpgrading(creep)) {
+            return creep.room.controller;
+        }
+        
         // Prioritize critical structures (containers over roads)
         const repairTargets = creep.room.find(FIND_STRUCTURES, {
             filter: s => s.hits < s.hitsMax * 0.5 && // Only repair if below 50%
@@ -747,21 +781,41 @@ const roleBuilder = {
      * @param {Creep} creep - The creep to reset
      */
     resetStuckBuilder: function(creep) {
+        // Check if this is a repairer stuck on controller
+        const isStuckOnController = creep.memory.targetId === creep.room.controller.id && 
+                                   creep.memory.isRepairer === true;
+        
         // Clear all target-related memory
         delete creep.memory.targetId;
         delete creep.memory.targetPos;
         delete creep.memory.lastTargetSearch;
         
-        // Force a new target search
-        const target = this.findBuildTarget(creep);
-        if (target) {
-            creep.memory.targetId = target.id;
+        // If this is a repairer stuck on controller, force it to upgrade
+        if (isStuckOnController) {
+            // Set a flag to force upgrading for a while
+            creep.memory.forceUpgrade = Game.time + 300; // Force upgrading for 300 ticks
+            creep.say('⚡ Upgrade');
+            console.log(`Repairer ${creep.name} was stuck on controller, switching to upgrading mode for 300 ticks`);
+            
+            // Set controller as target
+            creep.memory.targetId = creep.room.controller.id;
             creep.memory.targetPos = {
-                x: target.pos.x,
-                y: target.pos.y,
-                roomName: target.pos.roomName
+                x: creep.room.controller.pos.x,
+                y: creep.room.controller.pos.y,
+                roomName: creep.room.name
             };
-            console.log(`Reset stuck builder ${creep.name}, new target: ${target.id}`);
+        } else {
+            // For other cases, force a new target search
+            const target = this.findBuildTarget(creep);
+            if (target) {
+                creep.memory.targetId = target.id;
+                creep.memory.targetPos = {
+                    x: target.pos.x,
+                    y: target.pos.y,
+                    roomName: target.pos.roomName
+                };
+                console.log(`Reset stuck builder ${creep.name}, new target: ${target.id}`);
+            }
         }
         
         // Reset error counter
