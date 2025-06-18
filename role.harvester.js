@@ -33,6 +33,26 @@ const roleHarvester = {
             }
         }
         
+        // Periodically check if source is depleted and consider switching
+        if (creep.memory.sourceId && Game.time % 20 === 0) {
+            const source = Game.getObjectById(creep.memory.sourceId);
+            if (source && source.energy === 0) {
+                // Check if there are other sources with energy
+                const otherSources = creep.room.find(FIND_SOURCES, {
+                    filter: s => s.id !== creep.memory.sourceId && s.energy > 0
+                });
+                
+                // If there are other sources with energy and we're not too far from spawn time,
+                // consider switching to a better source
+                if (otherSources.length > 0 && creep.ticksToLive > 100) {
+                    // Release current source
+                    roomManager.releaseSource(creep.memory.sourceId, creep.memory.homeRoom);
+                    creep.memory.sourceId = null;
+                    creep.say('⚡ Switch');
+                }
+            }
+        }
+        
         // If creep doesn't have a source assigned, get one
         if (!creep.memory.sourceId) {
             // Try to get a source from room manager

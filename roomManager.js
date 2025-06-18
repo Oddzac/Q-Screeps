@@ -368,9 +368,14 @@ const roomManager = {
             return null;
         }
         
+        // First, verify and clean up source assignments
+        this.validateSourceAssignments(room);
+        
         // Find source with the lowest harvester-to-capacity ratio
         let bestSourceId = null;
         let lowestRatio = Infinity;
+        let highestEnergy = 0;
+        let highestEnergyId = null;
         
         for (const sourceId in room.memory.sources) {
             const sourceMemory = room.memory.sources[sourceId];
@@ -382,6 +387,19 @@ const roomManager = {
             // Skip sources near source keepers
             if (sourceMemory.nearKeeper === true) continue;
             
+            // Get the actual source object to check energy
+            const source = Game.getObjectById(sourceId);
+            if (!source) {
+                delete room.memory.sources[sourceId];
+                continue;
+            }
+            
+            // Track source with highest energy
+            if (source.energy > highestEnergy) {
+                highestEnergy = source.energy;
+                highestEnergyId = sourceId;
+            }
+            
             // Calculate ratio of assigned harvesters to available spots
             const ratio = sourceMemory.assignedHarvesters / sourceMemory.availableSpots;
             
@@ -392,10 +410,24 @@ const roomManager = {
             }
         }
         
+        // If all sources have same ratio but one has more energy, prefer that one
+        if (lowestRatio === 0 && highestEnergyId) {
+            bestSourceId = highestEnergyId;
+        }
+        
         // Assign harvester to the best source
         if (bestSourceId) {
             const source = Game.getObjectById(bestSourceId);
             if (source) {
+                // Log assignment for debugging
+                if (Game.time % 100 === 0 || !room.memory.sources[bestSourceId].lastAssignmentLog || 
+                    Game.time - room.memory.sources[bestSourceId].lastAssignmentLog > 100) {
+                    console.log(`Assigning harvester to source ${bestSourceId} in room ${room.name} ` +
+                                `(${room.memory.sources[bestSourceId].assignedHarvesters + 1}/${room.memory.sources[bestSourceId].availableSpots} harvesters, ` +
+                                `${source.energy}/${source.energyCapacity} energy)`);
+                    room.memory.sources[bestSourceId].lastAssignmentLog = Game.time;
+                }
+                
                 room.memory.sources[bestSourceId].assignedHarvesters++;
                 return source;
             } else {
@@ -408,15 +440,70 @@ const roomManager = {
     },
     
     /**
-     * Release a source assignment when a harvester dies
+     * Validate and clean up source assignments
+     * @param {Room} room - The room to check
+     */
+    validateSourceAssignments: function(room) {
+        // Only run this check occasionally to save CPU
+        if (Game.time % 50 !== 0) return;
+        
+        // Count actual harvesters assigned to each source
+        const actualAssignments = {};
+        
+        // Initialize counts for each source
+        for (const sourceId in room.memory.sources) {
+            actualAssignments[sourceId] = 0;
+        }
+        
+        // Count harvesters by their assigned source
+        for (const name in Game.creeps) {
+            const creep = Game.creeps[name];
+            if (creep.memory.role === 'harvester' && creep.memory.sourceId && 
+                creep.memory.homeRoom === room.name) {
+                if (actualAssignments[creep.memory.sourceId] !== undefined) {
+                    actualAssignments[creep.memory.sourceId]++;
+                }
+            }
+        }
+        
+        // Update source assignments in memory
+        let correctionsMade = false;
+        for (const sourceId in room.memory.sources) {
+            const remembered = room.memory.sources[sourceId].assignedHarvesters || 0;
+            const actual = actualAssignments[sourceId] || 0;
+            
+            if (remembered !== actual) {
+                room.memory.sources[sourceId].assignedHarvesters = actual;
+                correctionsMade = true;
+            }
+        }
+        
+        // Log if corrections were made
+        if (correctionsMade) {
+            console.log(`Corrected harvester assignments in room ${room.name}`);
+        }
+    },
+    
+    /**
+     * Release a source assignment when a harvester dies or switches sources
      * @param {string} sourceId - ID of the source
      * @param {string} roomName - Name of the room
+     * @param {boolean} logRelease - Whether to log the release (default: false)
      */
-    releaseSource: function(sourceId, roomName) {
+    releaseSource: function(sourceId, roomName, logRelease = false) {
         const room = Game.rooms[roomName];
         if (room && room.memory.sources && room.memory.sources[sourceId]) {
+            const oldCount = room.memory.sources[sourceId].assignedHarvesters || 0;
             room.memory.sources[sourceId].assignedHarvesters = 
-                Math.max(0, room.memory.sources[sourceId].assignedHarvesters - 1);
+                Math.max(0, oldCount - 1);
+                
+            // Log release if requested or periodically
+            if (logRelease || (Game.time % 100 === 0 && oldCount > 0)) {
+                const source = Game.getObjectById(sourceId);
+                const energyInfo = source ? `${source.energy}/${source.energyCapacity} energy` : 'unknown energy';
+                console.log(`Released harvester from source ${sourceId} in room ${roomName} ` +
+                            `(${room.memory.sources[sourceId].assignedHarvesters}/${room.memory.sources[sourceId].availableSpots} harvesters, ${energyInfo})`);
+            }
         }
     },
     
