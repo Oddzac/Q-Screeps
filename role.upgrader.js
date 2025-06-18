@@ -18,6 +18,13 @@ const roleUpgrader = {
             creep.memory.upgrading = false;
         }
         
+        // Generate pixel if CPU bucket is full
+        if (Game.time % 25 === 0) {
+            if (Game.cpu.bucket === 10000) {
+                this.genPix(creep);
+            }
+        }
+        
         // State switching with minimal operations
         if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.upgrading = false;
