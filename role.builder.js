@@ -684,7 +684,7 @@ const roleBuilder = {
             if (containers.length > 0) {
                 // Get container classifications to avoid controller containers
                 const containerTypes = roomManager.classifyContainers(creep.room);
-                const controllerContainerIds = containerTypes?.containerIds?.controller || [];
+                const controllerContainerIds = (containerTypes && containerTypes.containerIds && containerTypes.containerIds.controller) || [];
                 
                 // Filter out controller containers
                 const usableContainers = containers.filter(c => !controllerContainerIds.includes(c.id));
