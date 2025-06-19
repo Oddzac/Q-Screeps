@@ -533,6 +533,9 @@ module.exports.loop = function() {
         // Update room intelligence once per tick
         roomManager.updateRoomData(room);
         
+        // Update repair targets for builders
+        roomManager.analyzeRepairTargets(room);
+        
         // Run defense manager - this is critical for survival
         try {
             const defenseStart = Game.cpu.getUsed();

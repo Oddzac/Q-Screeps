@@ -87,29 +87,21 @@ const roleBuilder = {
         if (!creep.memory.task) {
             this.assignTask(creep);
         }
-        // Use cached target if available
-        let target = null;
+        // Get current target and validate it
+        let target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
         
-        // Special handling for controller targets
-        if (creep.memory.targetId === creep.room.controller.id) {
-            target = creep.room.controller;
-        } else {
-            target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
-        }
+        // Validate target is still valid for current task
+        const isValidTarget = target && (
+            (creep.memory.task === 'repairing' && target.hits < target.hitsMax) ||
+            (creep.memory.task === 'building' && target.progress < target.progressTotal) ||
+            (creep.memory.task === 'upgrading' && target.structureType === STRUCTURE_CONTROLLER)
+        );
         
-        // If target is gone or completed, find a new one
-        if (!target || (target.progress !== undefined && target.progress === target.progressTotal)) {
+        // If target is invalid, clear it and find new one
+        if (!isValidTarget) {
             delete creep.memory.targetId;
             delete creep.memory.targetPos;
-            
-            // Only search for new targets periodically to save CPU
-            if (!creep.memory.lastTargetSearch || Game.time - creep.memory.lastTargetSearch > 10) {
-                target = this.findBuildTarget(creep);
-                creep.memory.lastTargetSearch = Game.time;
-            } else {
-                // Default to controller between searches
-                target = creep.room.controller;
-            }
+            target = this.findTaskTarget(creep);
         }
         
         // Cache the target
@@ -320,7 +312,62 @@ const roleBuilder = {
     },
     
     /**
-     * Find a build or repair target
+     * Find target based on current task
+     * @param {Creep} creep - The creep to find a target for
+     * @returns {Object} - The target object
+     */
+    findTaskTarget: function(creep) {
+        if (creep.memory.task === 'repairing') {
+            return this.findRepairTarget(creep);
+        } else if (creep.memory.task === 'building') {
+            return this.findConstructionTarget(creep);
+        } else {
+            return creep.room.controller;
+        }
+    },
+    
+    /**
+     * Find construction target using cached data
+     * @param {Creep} creep - The creep to find a target for
+     * @returns {Object} - The target object
+     */
+    findConstructionTarget: function(creep) {
+        const roomManager = require('roomManager');
+        const constructionSiteIds = roomManager.getRoomData(creep.room.name, 'constructionSiteIds');
+        
+        if (constructionSiteIds && constructionSiteIds.length > 0) {
+            for (const id of constructionSiteIds) {
+                const site = Game.getObjectById(id);
+                if (site && site.progress < site.progressTotal) {
+                    return site;
+                }
+            }
+        }
+        
+        return creep.room.controller;
+    },
+    
+    /**
+     * Find repair target using cached data
+     * @param {Creep} creep - The creep to find a target for
+     * @returns {Object} - The target object
+     */
+    findRepairTarget: function(creep) {
+        // Use cached repair targets from room memory
+        if (creep.room.memory.repairTargets && creep.room.memory.repairTargets.length > 0) {
+            for (const id of creep.room.memory.repairTargets) {
+                const structure = Game.getObjectById(id);
+                if (structure && structure.hits < structure.hitsMax) {
+                    return structure;
+                }
+            }
+        }
+        
+        return creep.room.controller;
+    },
+    
+    /**
+     * Find a build or repair target (legacy method)
      * @param {Creep} creep - The creep to find a target for
      * @returns {Object} - The target object
      */

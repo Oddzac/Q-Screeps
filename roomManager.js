@@ -823,6 +823,61 @@ const roomManager = {
         };
         
         return result;
+    },
+    
+    /**
+     * Analyze and cache repair targets in a room
+     * @param {Room} room - The room to analyze
+     * @returns {Array} - Prioritized repair targets
+     */
+    analyzeRepairTargets: function(room) {
+        const cacheKey = `repairTargets_${room.name}`;
+        if (this.cache[cacheKey] && Game.time - this.cache[cacheKey].time < 10) {
+            return this.cache[cacheKey].value;
+        }
+
+        const repairTargets = room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax * 0.8 && 
+                      (s.structureType === STRUCTURE_CONTAINER || 
+                       s.structureType === STRUCTURE_SPAWN ||
+                       s.structureType === STRUCTURE_EXTENSION ||
+                       s.structureType === STRUCTURE_TOWER ||
+                       s.structureType === STRUCTURE_ROAD)
+        });
+
+        // Sort by priority: critical structures first, then by damage percentage
+        repairTargets.sort((a, b) => {
+            const priorityOrder = {
+                [STRUCTURE_SPAWN]: 1,
+                [STRUCTURE_EXTENSION]: 2,
+                [STRUCTURE_TOWER]: 3,
+                [STRUCTURE_CONTAINER]: 4,
+                [STRUCTURE_ROAD]: 5
+            };
+            
+            const aPriority = priorityOrder[a.structureType] || 6;
+            const bPriority = priorityOrder[b.structureType] || 6;
+            
+            if (aPriority !== bPriority) {
+                return aPriority - bPriority;
+            }
+            
+            // Same priority, sort by damage percentage (most damaged first)
+            return (a.hits / a.hitsMax) - (b.hits / b.hitsMax);
+        });
+
+        const result = repairTargets.map(s => s.id);
+        
+        this.cache[cacheKey] = {
+            time: Game.time,
+            value: result
+        };
+        
+        // Store in room memory for builders
+        room.memory.repairTargets = result;
+        room.memory.repairTargetsTime = Game.time;
+        
+        return result;
     }
 };
 
