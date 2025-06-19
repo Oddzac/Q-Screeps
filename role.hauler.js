@@ -13,7 +13,7 @@ const roleHauler = {
         this.checkBuilderAssignments(creep);
         
         // State switching with minimal operations
-        if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
+        if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
             creep.memory.working = false;
             // Clear any builder assignments when empty
             if (creep.memory.assignedRequestId) {
@@ -27,7 +27,7 @@ const roleHauler = {
         
         // Execute current state
         if (creep.memory.working) {
-            this.deliverEnergy(creep);
+            this.deliverResources(creep);
         } else {
             this.collectEnergy(creep);
         }
@@ -193,7 +193,13 @@ const roleHauler = {
         creep.memory.targetId = room.controller.id;
     },
     
-    deliverEnergy: function(creep) {
+    deliverResources: function(creep) {
+        // Handle non-energy resources first
+        const nonEnergyResources = Object.keys(creep.store).filter(r => r !== RESOURCE_ENERGY && creep.store[r] > 0);
+        if (nonEnergyResources.length > 0) {
+            this.deliverNonEnergyResources(creep, nonEnergyResources[0]);
+            return;
+        }
         // Check if we're assigned to a builder request
         if (creep.memory.assignedRequestId) {
             const builder = Game.getObjectById(creep.memory.assignedRequestId);
@@ -302,6 +308,13 @@ const roleHauler = {
     },
     
     collectEnergy: function(creep) {
+        // Check for non-energy resources first (higher priority)
+        const nonEnergySource = this.findNonEnergyResources(creep);
+        if (nonEnergySource) {
+            this.collectNonEnergyResources(creep, nonEnergySource);
+            return;
+        }
+        
         // Use cached source if available and still valid
         let source = creep.memory.sourceId ? Game.getObjectById(creep.memory.sourceId) : null;
         
@@ -400,6 +413,104 @@ const roleHauler = {
             const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
             if (spawn) {
                 movementManager.moveToTarget(creep, spawn, { range: 3, reusePath: 20 });
+            }
+        }
+    },
+    
+    /**
+     * Find non-energy resources in tombstones and containers
+     * @param {Creep} creep - The hauler creep
+     * @returns {Object|null} - Source with non-energy resources or null
+     */
+    findNonEnergyResources: function(creep) {
+        // Find tombstones with non-energy resources
+        const tombstones = creep.room.find(FIND_TOMBSTONES, {
+            filter: t => {
+                for (const resourceType in t.store) {
+                    if (resourceType !== RESOURCE_ENERGY && t.store[resourceType] > 0) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        });
+        
+        // Find containers with non-energy resources
+        const containers = creep.room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                      Object.keys(s.store).some(r => r !== RESOURCE_ENERGY && s.store[r] > 0)
+        });
+        
+        // Combine and find closest
+        const allSources = [...tombstones, ...containers];
+        if (allSources.length > 0) {
+            return creep.pos.findClosestByRange(allSources);
+        }
+        
+        return null;
+    },
+    
+    /**
+     * Collect non-energy resources from source
+     * @param {Creep} creep - The hauler creep
+     * @param {Object} source - The source to collect from
+     */
+    collectNonEnergyResources: function(creep, source) {
+        // Find the first non-energy resource type
+        let resourceType = null;
+        for (const type in source.store) {
+            if (type !== RESOURCE_ENERGY && source.store[type] > 0) {
+                resourceType = type;
+                break;
+            }
+        }
+        
+        if (resourceType) {
+            const result = creep.withdraw(source, resourceType);
+            if (result === ERR_NOT_IN_RANGE) {
+                movementManager.moveToTarget(creep, source, { reusePath: 10 });
+                creep.say('🔍');
+            } else if (result === OK) {
+                creep.say('📦');
+            }
+        }
+    },
+    
+    /**
+     * Deliver non-energy resources to storage or terminal
+     * @param {Creep} creep - The hauler creep
+     * @param {string} resourceType - The resource type to deliver
+     */
+    deliverNonEnergyResources: function(creep, resourceType) {
+        // Priority: Storage > Terminal > Controller (drop)
+        let target = creep.room.storage;
+        
+        if (!target || target.store.getFreeCapacity() === 0) {
+            target = creep.room.terminal;
+        }
+        
+        if (!target || target.store.getFreeCapacity() === 0) {
+            // Drop near controller as last resort
+            target = creep.room.controller;
+        }
+        
+        if (target) {
+            let result;
+            if (target.structureType === STRUCTURE_CONTROLLER) {
+                // Drop the resource near controller
+                result = creep.drop(resourceType);
+                if (result === OK) {
+                    creep.say('📤');
+                }
+            } else {
+                // Transfer to storage/terminal
+                result = creep.transfer(target, resourceType);
+                if (result === ERR_NOT_IN_RANGE) {
+                    movementManager.moveToTarget(creep, target, { reusePath: 10 });
+                    creep.say('📦');
+                } else if (result === OK) {
+                    creep.say('📥');
+                }
             }
         }
     }
