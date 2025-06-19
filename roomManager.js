@@ -918,7 +918,8 @@ const roomManager = {
         
         let currentWorkParts = 0;
         for (const harvester of currentHarvesters) {
-            currentWorkParts += harvester.body.filter(part => part.type === WORK).length;
+            // Fix: Use bodyPart.type instead of part.type
+            currentWorkParts += _.filter(harvester.body, part => part.type === WORK).length;
         }
         
         // Calculate current harvest rate (2 energy per WORK part per tick)
@@ -927,6 +928,23 @@ const roomManager = {
         // Source regenerates 10 energy per tick per source
         const totalSourceRegen = sourceCount * 10;
         
+        // Count available spots at sources
+        let totalAvailableSpots = 0;
+        for (const sourceId in room.memory.sources) {
+            const sourceMemory = room.memory.sources[sourceId];
+            if (sourceMemory && sourceMemory.availableSpots) {
+                totalAvailableSpots += sourceMemory.availableSpots;
+            }
+        }
+        
+        // If no spots data yet, use a reasonable default
+        if (totalAvailableSpots === 0) {
+            totalAvailableSpots = sourceCount * 3; // Assume 3 spots per source as default
+        }
+        
+        // Cap harvester count by available spots
+        const maxHarvestersBySpots = totalAvailableSpots;
+        
         // If current harvesters can't keep up with regen, we need more
         if (currentHarvestRate < totalSourceRegen) {
             // Calculate optimal work parts needed
@@ -934,18 +952,30 @@ const roomManager = {
             
             // Calculate what new harvesters would have (based on current energy capacity)
             const energyCapacity = room.energyCapacityAvailable;
-            const harvesterSets = Math.floor(energyCapacity / 250);
-            const newHarvesterWorkParts = Math.min(harvesterSets * 2, 32);
+            
+            // Make sure we use a reasonable energy amount for calculation
+            // If energy capacity is too low, use a minimum viable harvester (1W+1C+1M = 200)
+            const harvesterEnergy = Math.max(250, energyCapacity);
+            const harvesterSets = Math.floor(harvesterEnergy / 250);
+            const newHarvesterWorkParts = Math.max(1, Math.min(harvesterSets * 2, 32));
             
             // Calculate how many more harvesters we need
             const workPartsDeficit = workPartsNeeded - currentWorkParts;
             const additionalHarvesters = Math.ceil(workPartsDeficit / newHarvesterWorkParts);
             
-            return Math.min(currentHarvesters.length + additionalHarvesters, 6);
+            // Cap by available spots and absolute maximum
+            return Math.min(
+                currentHarvesters.length + additionalHarvesters, 
+                maxHarvestersBySpots,
+                sourceCount * 3 // Hard cap at 3 harvesters per source
+            );
         }
         
         // If we have enough harvest capacity, maintain current count but allow natural reduction
-        return Math.max(sourceCount, currentHarvesters.length);
+        return Math.min(
+            Math.max(sourceCount, currentHarvesters.length),
+            maxHarvestersBySpots
+        );
     },
     
     /**

@@ -278,6 +278,27 @@ const spawnManager = {
      * @returns {boolean} - True if spawning was initiated
      */
     spawnCreep: function(spawn, role, energy) {
+        // Get current counts and optimal counts
+        const roomManager = require('roomManager');
+        const counts = roomManager.getRoomData(spawn.room.name, 'creepCounts') || {
+            harvester: 0,
+            hauler: 0,
+            upgrader: 0,
+            builder: 0,
+            total: 0
+        };
+        const optimalCounts = roomManager.analyzeRoomNeeds(spawn.room);
+        
+        // For harvesters, check if we're already at or above optimal count
+        // If so, only spawn if we can make a reasonably sized creep (at least 2 WORK parts)
+        if (role === 'harvester' && counts.harvester >= optimalCounts.harvester) {
+            // If we're already at optimal count, require at least 350 energy (2W+1C+1M)
+            if (energy < 350) {
+                console.log(`Skipping underpowered harvester spawn: already at optimal count (${counts.harvester}/${optimalCounts.harvester}) and energy too low (${energy})`);
+                return false;
+            }
+        }
+        
         // Calculate the best body based on available energy
         const body = this.calculateBody(role, energy);
         
@@ -361,19 +382,23 @@ const spawnManager = {
         
         switch (role) {
             case 'harvester':
-                // Harvester: 2 WORK per MOVE for efficiency, 1 CARRY for pickup
-                // Pattern: 2W + 1C + 1M = 250 energy per set
-                const harvesterSets = Math.min(Math.floor(energy / 250), 12); // Max 48 parts
-                const workParts = harvesterSets * 2;
-                const carryParts = harvesterSets;
-                const moveParts = harvesterSets;
-                
-                // Optimal order: WORK parts first, then CARRY, then MOVE
-                for (let i = 0; i < workParts; i++) body.push(WORK);
-                for (let i = 0; i < carryParts; i++) body.push(CARRY);
-                for (let i = 0; i < moveParts; i++) body.push(MOVE);
-                
-                if (body.length === 0) body = [WORK, CARRY, MOVE];
+                // Check if we have enough energy for at least one set
+                if (energy >= 250) {
+                    // Harvester: 2 WORK per MOVE for efficiency, 1 CARRY for pickup
+                    // Pattern: 2W + 1C + 1M = 250 energy per set
+                    const harvesterSets = Math.min(Math.floor(energy / 250), 12); // Max 48 parts
+                    const workParts = harvesterSets * 2;
+                    const carryParts = harvesterSets;
+                    const moveParts = harvesterSets;
+                    
+                    // Optimal order: WORK parts first, then CARRY, then MOVE
+                    for (let i = 0; i < workParts; i++) body.push(WORK);
+                    for (let i = 0; i < carryParts; i++) body.push(CARRY);
+                    for (let i = 0; i < moveParts; i++) body.push(MOVE);
+                } else if (energy >= 200) {
+                    // Fallback to minimum viable harvester if we can't afford a full set
+                    body = [WORK, CARRY, MOVE]; // 200 energy
+                }
                 break;
                 
             case 'hauler':
@@ -445,11 +470,32 @@ const spawnManager = {
         
         if (actualCost > energy) {
             console.log(`Warning: Body cost ${actualCost} exceeds available energy ${energy}`);
-            // This shouldn't happen with our calculations, but just in case
+            
+            // Instead of defaulting to a minimum body that might still be too expensive,
+            // calculate the largest body we can actually afford
             if (role === 'hauler') {
-                body = [CARRY, CARRY, MOVE]; // Minimum hauler
+                // For haulers: try to get as many CARRY+MOVE pairs as possible
+                const affordablePairs = Math.floor(energy / 100); // 50+50 per pair
+                if (affordablePairs >= 1) {
+                    body = [];
+                    for (let i = 0; i < affordablePairs; i++) {
+                        body.push(CARRY);
+                    }
+                    for (let i = 0; i < affordablePairs; i++) {
+                        body.push(MOVE);
+                    }
+                } else {
+                    // Can't even afford one pair
+                    return [];
+                }
             } else {
-                body = [WORK, CARRY, MOVE]; // Minimum for other roles
+                // For other roles: check if we can afford the minimum viable creep
+                if (energy >= 200) { // 100+50+50 for WORK+CARRY+MOVE
+                    body = [WORK, CARRY, MOVE];
+                } else {
+                    // Can't afford minimum viable creep
+                    return [];
+                }
             }
         }
         
