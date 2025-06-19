@@ -622,28 +622,25 @@ const roomManager = {
             filter: t => t.store[RESOURCE_ENERGY] > 0
         });
         
-        // Find and categorize containers
-        const containers = room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER && 
-                      s.store[RESOURCE_ENERGY] > 0
-        });
+        // Get container classifications
+        const containerTypes = this.classifyContainers(room);
         
-        const sourceContainers = containers.filter(c => 
-            room.find(FIND_SOURCES, {
-                filter: source => source.pos.inRangeTo(c, 2)
-            }).length > 0
-        );
+        // Filter for containers with energy
+        const sourceContainers = containerTypes.sourceContainers
+            .filter(c => c.store[RESOURCE_ENERGY] > 0)
+            .sort((a, b) => b.store[RESOURCE_ENERGY] - a.store[RESOURCE_ENERGY]);
         
-        const otherContainers = containers.filter(c => !sourceContainers.includes(c));
+        const otherContainers = containerTypes.otherContainers
+            .filter(c => c.store[RESOURCE_ENERGY] > 0);
         
-        // Sort source containers by energy content
-        sourceContainers.sort((a, b) => b.store[RESOURCE_ENERGY] - a.store[RESOURCE_ENERGY]);
+        // Controller containers are not considered energy sources for haulers
         
         const result = {
             droppedResources,
             tombstones,
             sourceContainers,
             otherContainers,
+            containerTypes: containerTypes.containerIds, // Include container IDs by type
             storage: room.storage && room.storage.store[RESOURCE_ENERGY] > 0 ? room.storage : null
         };
         
@@ -678,11 +675,13 @@ const roomManager = {
                       s.store.getFreeCapacity(RESOURCE_ENERGY) > s.store.getCapacity(RESOURCE_ENERGY) * 0.2
         }).sort((a, b) => a.store[RESOURCE_ENERGY] - b.store[RESOURCE_ENERGY]);
 
-        const controllerContainers = room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER && 
-                      s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
-                      s.pos.inRangeTo(room.controller, 3)
-        }).sort((a, b) => b.store.getFreeCapacity(RESOURCE_ENERGY) - a.store.getFreeCapacity(RESOURCE_ENERGY));
+        // Get container classifications
+        const containerTypes = this.classifyContainers(room);
+        
+        // Only include controller containers that aren't full
+        const controllerContainers = containerTypes.controllerContainers
+            .filter(c => c.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+            .sort((a, b) => b.store.getFreeCapacity(RESOURCE_ENERGY) - a.store.getFreeCapacity(RESOURCE_ENERGY));
 
         const result = {
             spawnsAndExtensions,
@@ -696,6 +695,73 @@ const roomManager = {
             value: result
         };
 
+        return result;
+    },
+    
+    /**
+     * Classify containers in a room as source or controller containers
+     * @param {Room} room - The room to analyze
+     * @returns {Object} - Categorized containers
+     */
+    classifyContainers: function(room) {
+        // Cache for 100 ticks since container positions rarely change
+        const cacheKey = `containerTypes_${room.name}`;
+        if (this.cache[cacheKey] && Game.time - this.cache[cacheKey].time < 100) {
+            return this.cache[cacheKey].value;
+        }
+        
+        // Find all containers
+        const containers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER
+        });
+        
+        // Classify containers
+        const sourceContainers = [];
+        const controllerContainers = [];
+        const otherContainers = [];
+        
+        for (const container of containers) {
+            // Check if near sources (within 2 tiles)
+            const nearbySources = container.pos.findInRange(FIND_SOURCES, 2);
+            if (nearbySources.length > 0) {
+                sourceContainers.push(container);
+                // Store container ID in source memory
+                for (const source of nearbySources) {
+                    if (!room.memory.sources) room.memory.sources = {};
+                    if (!room.memory.sources[source.id]) room.memory.sources[source.id] = {};
+                    room.memory.sources[source.id].containerId = container.id;
+                }
+                continue;
+            }
+            
+            // Check if near controller (within 3 tiles)
+            if (container.pos.inRangeTo(room.controller, 3)) {
+                controllerContainers.push(container);
+                // Store controller container ID in room memory
+                room.memory.controllerContainer = container.id;
+                continue;
+            }
+            
+            // Other containers
+            otherContainers.push(container);
+        }
+        
+        const result = {
+            sourceContainers,
+            controllerContainers,
+            otherContainers,
+            containerIds: {
+                source: sourceContainers.map(c => c.id),
+                controller: controllerContainers.map(c => c.id),
+                other: otherContainers.map(c => c.id)
+            }
+        };
+        
+        this.cache[cacheKey] = {
+            time: Game.time,
+            value: result
+        };
+        
         return result;
     },
     

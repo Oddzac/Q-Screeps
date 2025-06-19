@@ -173,14 +173,20 @@ const roleHauler = {
         
         // Controller container (fourth priority)
         if (targets.controllerContainers.length > 0) {
-            creep.memory.targetId = targets.controllerContainers[0].id;
-            return;
+            // Make sure we're not trying to deliver to the same container we're withdrawing from
+            if (creep.memory.sourceId !== targets.controllerContainers[0].id) {
+                creep.memory.targetId = targets.controllerContainers[0].id;
+                return;
+            }
         }
         
         // Storage (fifth priority)
         if (targets.storage) {
-            creep.memory.targetId = targets.storage.id;
-            return;
+            // Make sure we're not trying to deliver to the same storage we're withdrawing from
+            if (creep.memory.sourceId !== targets.storage.id) {
+                creep.memory.targetId = targets.storage.id;
+                return;
+            }
         }
         
         // Controller as fallback
@@ -331,6 +337,13 @@ const roleHauler = {
                 let bestScore = Infinity;
                 
                 for (const s of allSources) {
+                    // Skip controller containers - they should never be energy sources for haulers
+                    if (s.structureType === STRUCTURE_CONTAINER && 
+                        sources.containerTypes && 
+                        sources.containerTypes.controller.includes(s.id)) {
+                        continue;
+                    }
+                    
                     // Calculate priority score (lower is better)
                     let typeScore;
                     
@@ -355,6 +368,17 @@ const roleHauler = {
                     source = bestSource;
                     creep.memory.sourceId = bestSource.id;
                 }
+            }
+        }
+        
+        // Double-check that we're not using a controller container as a source
+        if (source && source.structureType === STRUCTURE_CONTAINER) {
+            const roomManager = require('roomManager');
+            const sources = roomManager.analyzeEnergySources(creep.room);
+            if (sources.containerTypes && sources.containerTypes.controller.includes(source.id)) {
+                // We've selected a controller container - clear it and try again next tick
+                creep.memory.sourceId = null;
+                return;
             }
         }
         
