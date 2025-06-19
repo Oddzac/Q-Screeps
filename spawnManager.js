@@ -296,14 +296,26 @@ const spawnManager = {
         
         switch (role) {
             case 'harvester':
-                // Calculate harvester: 2 WORK + 1 CARRY + 1 MOVE (cost: 250 per set)
-                const harvesterSets = Math.floor(energy / 250);
-                const maxHarvesterSets = Math.min(harvesterSets, 12); // Cap at 48 parts (12 sets * 4 parts)
+                // Calculate harvester: 2 WORK + 1 CARRY + 1 MOVE = 250 energy per set
+                let harvesterSets = Math.floor(energy / 250);
+                harvesterSets = Math.min(harvesterSets, 12); // Cap at 48 parts max
+                
                 body = [];
-                for (let i = 0; i < maxHarvesterSets; i++) {
+                for (let i = 0; i < harvesterSets; i++) {
                     body.push(WORK, WORK, CARRY, MOVE);
                 }
-                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum
+                
+                // Verify we don't exceed energy limit
+                const bodyCost = body.reduce((cost, part) => {
+                    return cost + (part === WORK ? 100 : 50);
+                }, 0);
+                
+                if (bodyCost > energy) {
+                    // Remove one set if over budget
+                    body = body.slice(0, -4);
+                }
+                
+                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum fallback
                 break;
                 
             case 'hauler':
