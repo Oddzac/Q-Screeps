@@ -74,8 +74,8 @@ const defenseManager = {
             }
         }
         
-        // Activate towers
-        this.activateTowers(room, hostiles);
+        // Run tower operations (handles attack, heal, and repair)
+        this.runTowers(room);
         
         // Alert nearby rooms if needed
         if (threatLevel >= 3 && Game.time % 10 === 0) {
@@ -147,49 +147,91 @@ const defenseManager = {
     },
     
     /**
-     * Activate towers to defend against hostiles
-     * @param {Room} room - The room to defend
-     * @param {Array} hostiles - Array of hostile creeps
+     * Run tower operations for a room
+     * @param {Room} room - The room to run towers for
      */
-    activateTowers: function(room, hostiles) {
-        if (hostiles.length === 0) return;
-        
+    runTowers: function(room) {
         const towers = room.find(FIND_MY_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_TOWER
+            filter: s => s.structureType === STRUCTURE_TOWER && s.energy > 0
         });
         
         if (towers.length === 0) return;
         
-        // Sort hostiles by priority
-        hostiles.sort((a, b) => {
-            // Prioritize creeps with healing parts
-            const aHasHeal = a.body.some(part => part.type === HEAL);
-            const bHasHeal = b.body.some(part => part.type === HEAL);
+        // Process each tower with priority actions
+        for (const tower of towers) {
+            // Priority 1: Heal injured creeps
+            if (this.towerHeal(tower)) continue;
             
-            if (aHasHeal && !bHasHeal) return -1;
-            if (!aHasHeal && bHasHeal) return 1;
+            // Priority 2: Attack hostiles
+            if (this.towerAttack(tower)) continue;
             
-            // Then prioritize creeps with attack parts
-            const aHasAttack = a.body.some(part => part.type === ATTACK || part.type === RANGED_ATTACK);
-            const bHasAttack = b.body.some(part => part.type === ATTACK || part.type === RANGED_ATTACK);
-            
-            if (aHasAttack && !bHasAttack) return -1;
-            if (!aHasAttack && bHasAttack) return 1;
-            
-            // Finally sort by distance to spawn
-            const spawn = room.find(FIND_MY_SPAWNS)[0];
-            if (spawn) {
-                return a.pos.getRangeTo(spawn) - b.pos.getRangeTo(spawn);
+            // Priority 3: Repair critical structures (only if tower has >80% energy)
+            if (tower.energy > tower.energyCapacity * 0.8) {
+                this.towerRepair(tower);
             }
-            
-            return 0;
+        }
+    },
+    
+    /**
+     * Tower healing logic
+     * @param {StructureTower} tower - The tower
+     * @returns {boolean} - True if action taken
+     */
+    towerHeal: function(tower) {
+        const injured = tower.room.find(FIND_MY_CREEPS, {
+            filter: c => c.hits < c.hitsMax
         });
         
-        // Attack the highest priority target with all towers
-        const target = hostiles[0];
-        for (const tower of towers) {
-            tower.attack(target);
+        if (injured.length > 0) {
+            const target = tower.pos.findClosestByRange(injured);
+            tower.heal(target);
+            return true;
         }
+        return false;
+    },
+    
+    /**
+     * Tower attack logic with priority targeting
+     * @param {StructureTower} tower - The tower
+     * @returns {boolean} - True if action taken
+     */
+    towerAttack: function(tower) {
+        const hostiles = tower.room.find(FIND_HOSTILE_CREEPS, {
+            filter: c => c.owner.username !== 'Source Keeper'
+        });
+        
+        if (hostiles.length === 0) return false;
+        
+        // Prioritize aggressive hostiles
+        const aggressive = hostiles.filter(c => 
+            c.body.some(part => part.type === ATTACK || part.type === RANGED_ATTACK)
+        );
+        
+        const target = aggressive.length > 0 ? 
+            tower.pos.findClosestByRange(aggressive) : 
+            tower.pos.findClosestByRange(hostiles);
+            
+        tower.attack(target);
+        return true;
+    },
+    
+    /**
+     * Tower repair logic using cached repair targets
+     * @param {StructureTower} tower - The tower
+     * @returns {boolean} - True if action taken
+     */
+    towerRepair: function(tower) {
+        // Use cached repair targets from room memory
+        if (tower.room.memory.repairTargets && tower.room.memory.repairTargets.length > 0) {
+            for (const id of tower.room.memory.repairTargets) {
+                const structure = Game.getObjectById(id);
+                if (structure && structure.hits < structure.hitsMax * 0.4) {
+                    tower.repair(structure);
+                    return true;
+                }
+            }
+        }
+        return false;
     },
     
     /**
