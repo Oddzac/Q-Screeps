@@ -216,7 +216,12 @@ const spawnManager = {
         // Calculate the best body based on available energy
         const body = this.calculateBody(role, energy);
         
-        if (body.length === 0) return false;
+        console.log(`Attempting to spawn ${role} with energy ${energy}, body: [${body.join(',')}]`);
+        
+        if (body.length === 0) {
+            console.log(`Failed to spawn ${role}: empty body calculated`);
+            return false;
+        }
         
         // Create a unique name
         const name = role + Game.time;
@@ -228,6 +233,8 @@ const spawnManager = {
                 homeRoom: spawn.room.name
             }
         });
+        
+        console.log(`Spawn result for ${role}: ${result} (${this.getSpawnErrorText(result)})`);
         
         if (result === OK) {
             // Check if this is the first builder (will become a repairer)
@@ -249,6 +256,24 @@ const spawnManager = {
         }
         
         return false;
+    },
+    
+    /**
+     * Get human readable spawn error text
+     * @param {number} errorCode - The spawn error code
+     * @returns {string} - Human readable error text
+     */
+    getSpawnErrorText: function(errorCode) {
+        const errors = {
+            [OK]: 'OK',
+            [ERR_NOT_OWNER]: 'NOT_OWNER',
+            [ERR_NAME_EXISTS]: 'NAME_EXISTS', 
+            [ERR_BUSY]: 'BUSY',
+            [ERR_NOT_ENOUGH_ENERGY]: 'NOT_ENOUGH_ENERGY',
+            [ERR_INVALID_ARGS]: 'INVALID_ARGS',
+            [ERR_RCL_NOT_ENOUGH]: 'RCL_NOT_ENOUGH'
+        };
+        return errors[errorCode] || `UNKNOWN_ERROR_${errorCode}`;
     },
     
     /**
