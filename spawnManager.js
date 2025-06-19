@@ -296,27 +296,52 @@ const spawnManager = {
         
         switch (role) {
             case 'harvester':
-                // Prioritize WORK parts for harvesters
-                body = this.createBalancedBody(energy, 2, 1, 1); // 2:1:1 ratio of WORK:CARRY:MOVE
+                // Calculate harvester: 2 WORK per 1 CARRY + 1 MOVE (cost: 250 per set)
+                const harvesterSets = Math.floor(energy / 250);
+                const maxHarvesterSets = Math.min(harvesterSets, 16); // Cap at 48 parts
+                body = [];
+                for (let i = 0; i < maxHarvesterSets; i++) {
+                    body.push(WORK, WORK, CARRY, MOVE);
+                }
+                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum
                 break;
                 
             case 'hauler':
-                // Prioritize CARRY and MOVE for haulers
-                body = this.createBalancedBody(energy, 0, 2, 2); // 0:2:2 ratio of WORK:CARRY:MOVE
-                // Add one WORK part for haulers to help with construction
-                if (energy >= 250 && body.length > 0) {
-                    body.unshift(WORK);
+                // Calculate hauler body properly
+                const haulerEnergy = energy - 100; // Reserve 100 for WORK part
+                if (haulerEnergy >= 100) { // Need at least 100 for 1 CARRY + 1 MOVE
+                    const carryMovePairs = Math.floor(haulerEnergy / 100); // Each pair costs 100
+                    const maxPairs = Math.min(carryMovePairs, 24); // Cap at 24 pairs (49 parts total with WORK)
+                    
+                    body = [WORK];
+                    for (let i = 0; i < maxPairs; i++) {
+                        body.push(CARRY, MOVE);
+                    }
+                } else {
+                    body = [CARRY, CARRY, MOVE]; // Minimum hauler without WORK
                 }
                 break;
                 
             case 'upgrader':
-                // Balanced body for upgraders
-                body = this.createBalancedBody(energy, 1, 1, 1); // 1:1:1 ratio of WORK:CARRY:MOVE
+                // Calculate upgrader: 1 WORK + 1 CARRY + 1 MOVE (cost: 200 per set)
+                const upgraderSets = Math.floor(energy / 200);
+                const maxUpgraderSets = Math.min(upgraderSets, 16); // Cap at 48 parts
+                body = [];
+                for (let i = 0; i < maxUpgraderSets; i++) {
+                    body.push(WORK, CARRY, MOVE);
+                }
+                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum
                 break;
                 
             case 'builder':
-                // Slightly more WORK parts for builders to speed up construction
-                body = this.createBalancedBody(energy, 2, 2, 2); // 2:2:2 ratio of WORK:CARRY:MOVE
+                // Calculate builder: 1 WORK + 1 CARRY + 1 MOVE (cost: 200 per set)
+                const builderSets = Math.floor(energy / 200);
+                const maxBuilderSets = Math.min(builderSets, 16); // Cap at 48 parts
+                body = [];
+                for (let i = 0; i < maxBuilderSets; i++) {
+                    body.push(WORK, CARRY, MOVE);
+                }
+                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum
                 break;
         }
         
