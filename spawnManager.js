@@ -133,7 +133,7 @@ const spawnManager = {
         const minBuilders = Math.min(maxBuilders, 1); // Always at least 1 builder for repairs
         
         // Total creep cap based on RCL - more flexible limits
-        const maxTotalCreeps = optimalCounts ? optimalCounts.total : Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 10 : 12)); 
+        const maxTotalCreeps = optimalCounts ? optimalCounts.total : Math.min(sourceCount * 4, rcl <= 2 ? 9 : (rcl <= 4 ? 10 : 12)); 
         
         // Check if we're at total creep capacity - enforce strict limit
         if (counts.total >= maxTotalCreeps) {
