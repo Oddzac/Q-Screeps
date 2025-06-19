@@ -815,7 +815,7 @@ const roomManager = {
             result.total = Math.min(result.total, room.memory.creepLimits.total);
         } else {
             // More flexible total based on sources and RCL
-            const defaultTotal = Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 10 : 12));
+            const defaultTotal = Math.min(sourceCount * 4, rcl <= 2 ? 9 : (rcl <= 4 ? 10 : 12));
             result.total = Math.min(result.total, defaultTotal);
         }
         
