@@ -788,8 +788,11 @@ const roomManager = {
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
         const repairTargets = this.getRoomData(room.name, 'repairTargets') || 0;
         
-        // Always have at least 1 builder for repairs, more if there are construction sites
-        result.builder = Math.min(3, Math.max(1, Math.floor(constructionSites / 5)));
+        // Always have at least 1 builder for repairs (repairer), more if there are construction sites
+        // Base: 1 repairer + additional builders based on construction sites
+        const baseBuilders = 1; // Always 1 for repairs
+        const constructionBuilders = constructionSites > 0 ? Math.min(2, Math.max(1, Math.floor(constructionSites / 3))) : 0;
+        result.builder = Math.min(3, baseBuilders + constructionBuilders);
         
         // Apply manual limits if set
         if (room.memory.creepLimits) {
@@ -814,8 +817,8 @@ const roomManager = {
         if (room.memory.creepLimits && room.memory.creepLimits.total !== undefined) {
             result.total = Math.min(result.total, room.memory.creepLimits.total);
         } else {
-            // More flexible total based on sources and RCL
-            const defaultTotal = Math.min(sourceCount * 4, rcl <= 2 ? 9 : (rcl <= 4 ? 10 : 12));
+            // More flexible total based on sources and RCL - increased limits
+            const defaultTotal = Math.min(sourceCount * 4, rcl <= 2 ? 9 : (rcl <= 4 ? 12 : 15));
             result.total = Math.min(result.total, defaultTotal);
         }
         

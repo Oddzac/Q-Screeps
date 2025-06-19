@@ -124,7 +124,7 @@ const spawnManager = {
         const maxHarvesters = optimalCounts ? optimalCounts.harvester : Math.min(sourceCount*2, 4); // Allow up to 4 harvesters for multiple sources
         const maxHaulers = optimalCounts ? optimalCounts.hauler : Math.min(Math.ceil(energyPerTick / 50), sourceCount + 2); // Scale with energy production
         const maxUpgraders = optimalCounts ? optimalCounts.upgrader : Math.min(2, rcl <= 2 ? 1 : 2); // At least 1 upgrader, max 2 at higher RCL
-        const maxBuilders = optimalCounts ? optimalCounts.builder : (constructionSites > 0 ? Math.min(3, Math.max(1, Math.floor(constructionSites / 5))) : 0); // More gradual scaling
+        const maxBuilders = optimalCounts ? optimalCounts.builder : Math.min(3, 1 + (constructionSites > 0 ? Math.min(2, Math.floor(constructionSites / 3)) : 0)); // 1 repairer + construction builders
         
         // Minimum requirements
         const minHarvesters = Math.min(maxHarvesters, 1); // At least 1 harvester
@@ -133,7 +133,7 @@ const spawnManager = {
         const minBuilders = Math.min(maxBuilders, 1); // Always at least 1 builder for repairs
         
         // Total creep cap based on RCL - more flexible limits
-        const maxTotalCreeps = optimalCounts ? optimalCounts.total : Math.min(sourceCount * 4, rcl <= 2 ? 9 : (rcl <= 4 ? 10 : 12)); 
+        const maxTotalCreeps = optimalCounts ? optimalCounts.total : Math.min(sourceCount * 4, rcl <= 2 ? 9 : (rcl <= 4 ? 12 : 15)); 
         
         // Check if we're at total creep capacity - enforce strict limit
         if (counts.total >= maxTotalCreeps) {
