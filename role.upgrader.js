@@ -47,22 +47,37 @@ const roleUpgrader = {
         }
         
         if (creep.memory.upgrading) {
-            // Upgrade the controller using cached position
+            // Find controller container for optimal positioning
+            const controllerContainer = this.findControllerContainer(creep);
+            
+            // Upgrade the controller
             const upgradeResult = creep.upgradeController(creep.room.controller);
             
             if (upgradeResult === ERR_NOT_IN_RANGE) {
-                // Use cached position if available
-                if (creep.memory.controllerPos) {
+                // If we have a controller container, position next to it
+                if (controllerContainer) {
+                    // Find a position adjacent to both the container and controller if possible
+                    const targetPos = this.findOptimalUpgradePosition(creep, controllerContainer);
+                    
+                    movementManager.moveToTarget(creep, targetPos, { 
+                        reusePath: 20, // Reuse path for longer since positions are static
+                        visualizePathStyle: {stroke: '#ffffff'}
+                    });
+                } 
+                // Otherwise use cached controller position
+                else if (creep.memory.controllerPos) {
                     const controllerPos = new RoomPosition(
                         creep.memory.controllerPos.x,
                         creep.memory.controllerPos.y,
                         creep.memory.controllerPos.roomName
                     );
                     movementManager.moveToTarget(creep, controllerPos, { 
-                        reusePath: 20, // Reuse path for longer since controller position is static
+                        reusePath: 20,
                         visualizePathStyle: {stroke: '#ffffff'}
                     });
-                } else {
+                } 
+                // Fallback to moving directly to controller
+                else {
                     movementManager.moveToTarget(creep, creep.room.controller, { 
                         reusePath: 20,
                         visualizePathStyle: {stroke: '#ffffff'}
@@ -75,6 +90,39 @@ const roleUpgrader = {
             // Get energy from the most efficient source
             this.getEnergy(creep);
         }
+    },
+    
+    /**
+     * Find optimal position for upgrading (adjacent to both container and controller if possible)
+     * @param {Creep} creep - The upgrader creep
+     * @param {Structure} container - The controller container
+     * @returns {RoomPosition} - The optimal position for upgrading
+     */
+    findOptimalUpgradePosition: function(creep, container) {
+        // If we've already cached an optimal position, use it
+        if (creep.memory.optimalPos) {
+            return new RoomPosition(
+                creep.memory.optimalPos.x,
+                creep.memory.optimalPos.y,
+                creep.memory.optimalPos.roomName
+            );
+        }
+        
+        // Try to find a position adjacent to both container and controller
+        const controller = creep.room.controller;
+        
+        // Simple approach: use the container position
+        // This works because controller containers are already positioned near the controller
+        const optimalPos = container.pos;
+        
+        // Cache the position
+        creep.memory.optimalPos = {
+            x: optimalPos.x,
+            y: optimalPos.y,
+            roomName: optimalPos.roomName
+        };
+        
+        return optimalPos;
     },
 
     /**
@@ -92,6 +140,36 @@ const roleUpgrader = {
         } else {
             console.log('Not enough CPU in the bucket to generate a pixel.');
         }
+    },
+    
+    /**
+     * Find the closest controller container
+     * @param {Creep} creep - The upgrader creep
+     * @returns {Structure|null} - The closest controller container or null if none found
+     */
+    findControllerContainer: function(creep) {
+        // Check if we've already cached the controller container
+        if (creep.memory.controllerContainerId) {
+            const container = Game.getObjectById(creep.memory.controllerContainerId);
+            if (container) return container;
+            delete creep.memory.controllerContainerId;
+        }
+        
+        // Use room manager to get controller containers
+        const roomManager = require('roomManager');
+        const containerTypes = roomManager.classifyContainers(creep.room);
+        
+        if (containerTypes && containerTypes.controllerContainers.length > 0) {
+            // Find closest controller container
+            const closestContainer = creep.pos.findClosestByRange(containerTypes.controllerContainers);
+            if (closestContainer) {
+                // Cache the container ID
+                creep.memory.controllerContainerId = closestContainer.id;
+                return closestContainer;
+            }
+        }
+        
+        return null;
     },
     
     /**
@@ -115,17 +193,28 @@ const roleUpgrader = {
         
         // Find new energy source if needed
         if (!source) {
-            // First check for controller container from room manager
-            const controllerContainer = roomManager.getRoomData(creep.room.name, 'controllerContainer');
-            if (controllerContainer) {
-                const container = Game.getObjectById(controllerContainer);
-                if (container && container.store[RESOURCE_ENERGY] > 0) {
-                    source = container;
-                    creep.memory.energySourceId = container.id;
+            // First check for controller containers using our new classification system
+            const containerTypes = roomManager.classifyContainers(creep.room);
+            
+            if (containerTypes && containerTypes.controllerContainers.length > 0) {
+                // Find controller container with most energy
+                const controllerContainers = containerTypes.controllerContainers
+                    .filter(c => c.store[RESOURCE_ENERGY] > 0)
+                    .sort((a, b) => b.store[RESOURCE_ENERGY] - a.store[RESOURCE_ENERGY]);
+                
+                if (controllerContainers.length > 0) {
+                    source = controllerContainers[0];
+                    creep.memory.energySourceId = source.id;
+                    
+                    // If we found a controller container, use it and skip other checks
+                    if (source) {
+                        creep.say('🔋');
+                        return;
+                    }
                 }
             }
             
-            // Also check for containers near controller
+            // Fallback to checking for containers near controller
             if (!source) {
                 const nearbyContainers = creep.pos.findInRange(FIND_STRUCTURES, 3, {
                     filter: s => s.structureType === STRUCTURE_CONTAINER && 
@@ -137,26 +226,6 @@ const roleUpgrader = {
                 }
             }
             
-            // If no controller container found, check nearby containers
-            if (!source && (!creep.memory.nearbyContainersChecked || Game.time - creep.memory.nearbyContainersChecked > 50)) {
-                const containers = creep.pos.findInRange(FIND_STRUCTURES, 5, {
-                    filter: s => s.structureType === STRUCTURE_CONTAINER && 
-                              s.store[RESOURCE_ENERGY] > creep.store.getFreeCapacity() / 2
-                });
-                
-                if (containers.length > 0) {
-                    source = containers[0];
-                    creep.memory.energySourceId = source.id;
-                    
-                    // Update room manager with controller container
-                    if (!roomManager.getRoomData(creep.room.name, 'controllerContainer')) {
-                        creep.room.memory.controllerContainer = source.id;
-                    }
-                }
-                
-                creep.memory.nearbyContainersChecked = Game.time;
-            }
-            
             // Check for storage
             if (!source && creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 0) {
                 source = creep.room.storage;
@@ -165,73 +234,50 @@ const roleUpgrader = {
             
             // If no container or storage, use room's cached energy sources from room manager
             if (!source) {
-                const energySources = roomManager.getRoomData(creep.room.name, 'energySources');
-                const energySourcesTime = roomManager.getRoomData(creep.room.name, 'energySourcesTime');
+                const energySources = roomManager.analyzeEnergySources(creep.room);
                 
-                if (energySources && Game.time - (energySourcesTime || 0) < 10) {
-                    for (const id of energySources) {
-                        const potentialSource = Game.getObjectById(id);
-                        if ((potentialSource && potentialSource.amount !== undefined && potentialSource.amount >= 50) || 
-                            (potentialSource && potentialSource.store && potentialSource.store[RESOURCE_ENERGY] > 0)) {
-                            source = potentialSource;
-                            creep.memory.energySourceId = id;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // Last resort - find active source
-            if (!source) {
-                // Use room manager's active sources if available
-                const activeSources = roomManager.getRoomData(creep.room.name, 'activeSources');
-                
-                if (activeSources && activeSources.length > 0) {
-                    // Find closest source
-                    let closestSource = null;
-                    let minDistance = Infinity;
-                    
-                    for (const id of activeSources) {
-                        const source = Game.getObjectById(id);
-                        if (source) {
-                            const distance = creep.pos.getRangeTo(source);
-                            if (distance < minDistance) {
-                                closestSource = source;
-                                minDistance = distance;
-                            }
-                        }
-                    }
-                    
-                    if (closestSource) {
-                        source = closestSource;
+                // Check dropped resources first
+                if (energySources.droppedResources.length > 0) {
+                    // Find closest dropped resource
+                    source = creep.pos.findClosestByRange(energySources.droppedResources);
+                    if (source) {
                         creep.memory.energySourceId = source.id;
                     }
-                } else {
-                    // Limit expensive searches
-                    if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > 10) {
-                        const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
-                        if (activeSources.length > 0) {
-                            // Find closest source
-                            let closestSource = activeSources[0];
-                            let minDistance = creep.pos.getRangeTo(closestSource);
-                            
-                            for (let i = 1; i < activeSources.length; i++) {
-                                const distance = creep.pos.getRangeTo(activeSources[i]);
-                                if (distance < minDistance) {
-                                    closestSource = activeSources[i];
-                                    minDistance = distance;
+                }
+                
+                // Then check tombstones
+                if (!source && energySources.tombstones.length > 0) {
+                    source = creep.pos.findClosestByRange(energySources.tombstones);
+                    if (source) {
+                        creep.memory.energySourceId = source.id;
+                    }
+                }
+                
+                // Last resort - find active source
+                if (!source) {
+                    // Use room manager's active sources if available
+                    const activeSources = roomManager.getRoomData(creep.room.name, 'activeSources');
+                    
+                    if (activeSources && activeSources.length > 0) {
+                        // Find closest source
+                        source = creep.pos.findClosestByRange(
+                            activeSources.map(id => Game.getObjectById(id)).filter(s => s)
+                        );
+                        if (source) {
+                            creep.memory.energySourceId = source.id;
+                        }
+                    } else {
+                        // Limit expensive searches
+                        if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > 10) {
+                            const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
+                            if (activeSources.length > 0) {
+                                source = creep.pos.findClosestByRange(activeSources);
+                                if (source) {
+                                    creep.memory.energySourceId = source.id;
                                 }
                             }
-                            
-                            source = closestSource;
-                            creep.memory.energySourceId = source.id;
-                            
-                            // Update room manager with active sources
-                            creep.room.memory.activeSources = activeSources.map(s => s.id);
-                            creep.room.memory.activeSourcesTime = Game.time;
+                            creep.memory.lastSourceSearch = Game.time;
                         }
-                        
-                        creep.memory.lastSourceSearch = Game.time;
                     }
                 }
             }
@@ -248,6 +294,19 @@ const roleUpgrader = {
                     y: source.pos.y,
                     roomName: source.pos.roomName
                 };
+            }
+            
+            // Check if this is a controller container and mark it in memory
+            if (source.structureType === STRUCTURE_CONTAINER) {
+                const roomManager = require('roomManager');
+                const containerTypes = roomManager.classifyContainers(creep.room);
+                if (containerTypes && containerTypes.containerIds.controller.includes(source.id)) {
+                    creep.memory.usingControllerContainer = true;
+                } else {
+                    creep.memory.usingControllerContainer = false;
+                }
+            } else {
+                creep.memory.usingControllerContainer = false;
             }
             
             if (source.amount !== undefined) {
@@ -269,8 +328,15 @@ const roleUpgrader = {
                     reusePath: 15,
                     visualizePathStyle: {stroke: '#ffaa00'}
                 });
+            } else if (actionResult === OK) {
+                // If we successfully withdrew from a controller container, indicate this
+                if (creep.memory.usingControllerContainer) {
+                    creep.say('⚡');
+                }
             } else if (actionResult !== OK) {
-                //console.log(`Upgrader ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
+                // If there was an error, clear the source and try again next tick
+                delete creep.memory.energySourceId;
+                delete creep.memory.sourcePos;
             }
         } else {
             // If no energy source found, move to controller area to wait
