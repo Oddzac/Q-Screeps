@@ -461,23 +461,32 @@ const roleHauler = {
      * @param {Object} source - The source to collect from
      */
     collectNonEnergyResources: function(creep, source) {
-        // Find the first non-energy resource type
         let resourceType = null;
-        for (const type in source.store) {
-            if (type !== RESOURCE_ENERGY && source.store[type] > 0) {
-                resourceType = type;
-                break;
+        let result;
+        
+        // Handle dropped resources
+        if (source.amount !== undefined) {
+            resourceType = source.resourceType;
+            result = creep.pickup(source);
+        } else {
+            // Handle tombstones and containers
+            for (const type in source.store) {
+                if (type !== RESOURCE_ENERGY && source.store[type] > 0) {
+                    resourceType = type;
+                    break;
+                }
+            }
+            
+            if (resourceType) {
+                result = creep.withdraw(source, resourceType);
             }
         }
         
-        if (resourceType) {
-            const result = creep.withdraw(source, resourceType);
-            if (result === ERR_NOT_IN_RANGE) {
-                movementManager.moveToTarget(creep, source, { reusePath: 10 });
-                creep.say('🔍');
-            } else if (result === OK) {
-                creep.say('📦');
-            }
+        if (result === ERR_NOT_IN_RANGE) {
+            movementManager.moveToTarget(creep, source, { reusePath: 10 });
+            creep.say('🔍');
+        } else if (result === OK) {
+            creep.say('📦');
         }
     },
     
