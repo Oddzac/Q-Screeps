@@ -61,21 +61,26 @@ const roleBuilder = {
         if (creep.memory.building) {
             this.performTask(creep);
         } else {
-            // When switching to harvesting mode, set a wait timer (only if not already harvesting)
-            if (!creep.memory.waitStartTime && !creep.memory.harvestingStarted && creep.store[RESOURCE_ENERGY] === 0) {
-                creep.memory.waitStartTime = Game.time;
-                creep.say('⏳');
-            }
-            
-            // Wait for haulers for 30 ticks before harvesting
-            if (creep.memory.waitStartTime && Game.time - creep.memory.waitStartTime < 30) {
-                // Just wait in place
-                creep.say('⏳' + (30 - (Game.time - creep.memory.waitStartTime)));
-            } else {
-                // Clear wait timer and proceed with harvesting
-                delete creep.memory.waitStartTime;
-                creep.memory.harvestingStarted = true; // Flag to prevent restarting the wait timer
+            // Skip waiting for repairers since they don't generate energy requests
+            if (creep.memory.task === 'repairing') {
                 this.getEnergy(creep);
+            } else {
+                // When switching to harvesting mode, set a wait timer (only if not already harvesting)
+                if (!creep.memory.waitStartTime && !creep.memory.harvestingStarted && creep.store[RESOURCE_ENERGY] === 0) {
+                    creep.memory.waitStartTime = Game.time;
+                    creep.say('⏳');
+                }
+                
+                // Wait for haulers for 30 ticks before harvesting
+                if (creep.memory.waitStartTime && Game.time - creep.memory.waitStartTime < 30) {
+                    // Just wait in place
+                    creep.say('⏳' + (30 - (Game.time - creep.memory.waitStartTime)));
+                } else {
+                    // Clear wait timer and proceed with harvesting
+                    delete creep.memory.waitStartTime;
+                    creep.memory.harvestingStarted = true; // Flag to prevent restarting the wait timer
+                    this.getEnergy(creep);
+                }
             }
         }
     },

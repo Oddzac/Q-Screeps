@@ -154,34 +154,36 @@ const roleHauler = {
             
             // If we found a suitable request, assign ourselves to it
             if (bestRequest) {
-                room.memory.energyRequests[bestRequest.id].assignedHaulerId = creep.id;
-                creep.memory.assignedRequestId = bestRequest.id;
-                creep.memory.targetId = bestRequest.id;
+                const builderId = Object.keys(room.memory.energyRequests).find(id => 
+                    room.memory.energyRequests[id] === bestRequest);
+                room.memory.energyRequests[builderId].assignedHaulerId = creep.id;
+                creep.memory.assignedRequestId = builderId;
+                creep.memory.targetId = builderId;
                 return;
             }
         }
         
 
         
-        // Find controller containers (third priority - moved up)
-        if (targets.controllerContainers.length > 0) {
-            creep.memory.targetId = targets.controllerContainers[0].id;
-            return;
-        }
-        
-        // Check for towers that need energy (fourth priority - moved down)
+        // Towers (third priority)
         if (targets.towers.length > 0) {
             creep.memory.targetId = targets.towers[0].id;
             return;
         }
         
-        // Check for storage (fifth priority)
+        // Controller container (fourth priority)
+        if (targets.controllerContainers.length > 0) {
+            creep.memory.targetId = targets.controllerContainers[0].id;
+            return;
+        }
+        
+        // Storage (fifth priority)
         if (targets.storage) {
             creep.memory.targetId = targets.storage.id;
             return;
         }
         
-        // If all else fails, use controller as fallback
+        // Controller as fallback
         creep.memory.targetId = room.controller.id;
     },
     
@@ -313,12 +315,15 @@ const roleHauler = {
             // Create prioritized list of sources
             const allSources = [];
             
-            // Add sources in priority order
+            // Add sources in priority order: Dropped > Tombstones > Containers > Storage
             allSources.push(...sources.droppedResources);
             allSources.push(...sources.tombstones);
             allSources.push(...sources.sourceContainers);
             allSources.push(...sources.otherContainers);
-            if (sources.storage) allSources.push(sources.storage);
+            // Storage is lowest priority and only if it has surplus
+            if (sources.storage && sources.storage.store[RESOURCE_ENERGY] > 100) {
+                allSources.push(sources.storage);
+            }
             
             if (allSources.length > 0) {
                 // Find closest source of highest priority
