@@ -763,11 +763,11 @@ const roomManager = {
         }
         
         // Calculate total limit first based on RCL and sources
-        const totalLimit = Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 10 : 12));
+        const totalLimit = Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 12 : 15));
         
         // Calculate base requirements
         const baseHarvester = Math.min(sourceCount * 2, 4);
-        const baseUpgrader = rcl < 8 ? Math.min(rcl <= 3 ? 1 : 2, 2) : 1;
+        const baseUpgrader = rcl < 8 ? 1 : 1; // Only 1 upgrader for RCL 4
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
         const baseBuilder = constructionSites > 0 ? 3 : 1; // 1 repairer + 2 builders when construction exists
         
