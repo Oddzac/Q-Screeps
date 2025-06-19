@@ -1091,7 +1091,7 @@ const roleBuilder = {
             delete creep.memory.energySourceType;
             creep.memory.lastSourceSearch = 0;
         }
-        
+    }
     }
 };
 
