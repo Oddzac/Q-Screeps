@@ -139,33 +139,50 @@ const constructionManagerImpl = {
         const sources = room.find(FIND_SOURCES);
         if (sources.length === 0) return;
         
-        // Plan roads from spawn to each source
-        const roads = new Set(); // Use Set to avoid duplicates
+        const roads = new Set();
+        const terrain = room.getTerrain();
+        
+        // Create exclusion set for sources and minerals
+        const exclusions = new Set();
+        sources.forEach(s => exclusions.add(`${s.pos.x},${s.pos.y}`));
+        room.find(FIND_MINERALS).forEach(m => exclusions.add(`${m.pos.x},${m.pos.y}`));
         
         // Path options optimized for road planning
         const pathOptions = {
             ignoreCreeps: true,
             swampCost: 2,
             plainCost: 1,
-            maxOps: 2000, // Limit pathfinding operations
+            maxOps: 2000,
             serialize: false
         };
         
         for (const source of sources) {
-            // Find path from spawn to source
-            const path = room.findPath(spawn.pos, source.pos, pathOptions);
+            // Find path from spawn to near source (not on source)
+            const nearSourcePos = this.findBestSourceAccessPoint(room, source);
+            const path = room.findPath(spawn.pos, nearSourcePos, pathOptions);
             
-            // Add road positions to the plan
+            // Add road positions excluding sources
             for (const step of path) {
-                roads.add(`${step.x},${step.y}`);
+                const posKey = `${step.x},${step.y}`;
+                if (!exclusions.has(posKey)) {
+                    roads.add(posKey);
+                }
+            }
+            
+            // Add strategic road near source if surrounded by walls
+            const sourceRoad = this.planSourceAccessRoad(room, source);
+            if (sourceRoad) {
+                roads.add(`${sourceRoad.x},${sourceRoad.y}`);
             }
         }
         
         // Plan road from spawn to controller
         const controllerPath = room.findPath(spawn.pos, room.controller.pos, pathOptions);
-        
         for (const step of controllerPath) {
-            roads.add(`${step.x},${step.y}`);
+            const posKey = `${step.x},${step.y}`;
+            if (!exclusions.has(posKey)) {
+                roads.add(posKey);
+            }
         }
         
         // Convert Set back to array of positions
@@ -182,6 +199,101 @@ const constructionManagerImpl = {
         };
         
         console.log(`Planned ${roadPositions.length} road positions in room ${room.name}`);
+    },
+    
+    /**
+     * Find best access point near a source
+     * @param {Room} room - The room
+     * @param {Source} source - The source
+     * @returns {RoomPosition} - Best access position
+     */
+    findBestSourceAccessPoint: function(room, source) {
+        const terrain = room.getTerrain();
+        let bestPos = source.pos;
+        let bestScore = -1;
+        
+        // Check positions around source
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+                
+                // Score based on adjacent walkable tiles
+                let score = 0;
+                for (let ndx = -1; ndx <= 1; ndx++) {
+                    for (let ndy = -1; ndy <= 1; ndy++) {
+                        const nx = x + ndx;
+                        const ny = y + ndy;
+                        if (nx >= 0 && nx < 50 && ny >= 0 && ny < 50 && 
+                            terrain.get(nx, ny) !== TERRAIN_MASK_WALL) {
+                            score++;
+                        }
+                    }
+                }
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = new RoomPosition(x, y, room.name);
+                }
+            }
+        }
+        
+        return bestPos;
+    },
+    
+    /**
+     * Plan strategic road placement near source if surrounded by walls
+     * @param {Room} room - The room
+     * @param {Source} source - The source
+     * @returns {Object|null} - Road position or null
+     */
+    planSourceAccessRoad: function(room, source) {
+        const terrain = room.getTerrain();
+        let bestPos = null;
+        let bestScore = -1;
+        
+        // Check positions around source for wall tiles adjacent to plains
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                
+                // Must be a wall tile adjacent to source
+                if (terrain.get(x, y) !== TERRAIN_MASK_WALL) continue;
+                
+                // Count adjacent plains tiles
+                let plainsCount = 0;
+                for (let ndx = -1; ndx <= 1; ndx++) {
+                    for (let ndy = -1; ndy <= 1; ndy++) {
+                        const nx = x + ndx;
+                        const ny = y + ndy;
+                        if (nx >= 0 && nx < 50 && ny >= 0 && ny < 50) {
+                            const terrainType = terrain.get(nx, ny);
+                            if (terrainType === 0) { // Plains
+                                plainsCount++;
+                            }
+                        }
+                    }
+                }
+                
+                // Prefer positions with more adjacent plains
+                if (plainsCount > bestScore) {
+                    bestScore = plainsCount;
+                    bestPos = { x, y };
+                }
+            }
+        }
+        
+        return bestPos;
     },
     
     /**
