@@ -18,9 +18,10 @@ const roleBuilder = {
             creep.memory.building = false;
         }
         
-        // Determine if this creep should be a repairer
-        // The first builder in each room becomes the dedicated repairer
-        this.assignRepairRole(creep);
+        // Assign task based on room needs
+        if (!creep.memory.task) {
+            this.assignTask(creep);
+        }
         
         // Check if this builder is stuck and reset if needed
         if (this.isStuck(creep)) {
