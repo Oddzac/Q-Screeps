@@ -217,6 +217,11 @@ const utils = {
         // Get recovery manager if available
         const recoveryManager = require('recoveryManager');
         
+        // Check if CPU usage is very low (used in multiple places)
+        const veryLowCpuUsage = global.cpuHistory && 
+                              global.cpuHistory.length > 0 && 
+                              global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
+        
         // In emergency mode, only run critical operations
         if (global.emergencyMode) {
             let result;
@@ -226,11 +231,6 @@ const utils = {
             
             // Get recovery factor if available
             const recoveryFactor = global.emergencyMode.recoveryFactor || 0.5;
-            
-            // Check if CPU usage is very low
-            const veryLowCpuUsage = global.cpuHistory && 
-                                  global.cpuHistory.length > 0 && 
-                                  global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
             
             if (global.emergencyMode.level === 'critical') {
                 // In critical mode, use adaptive thresholds based on recovery factor
@@ -275,11 +275,6 @@ const utils = {
         // Check if we're in recovery mode (but not in emergency mode)
         const inRecoveryPeriod = recoveryManager && recoveryManager.isRecovering;
         const recoveryFactor = recoveryManager ? recoveryManager.getRecoveryFactor() : 1.0;
-        
-        // Check if CPU usage is very low
-        const veryLowCpuUsage = global.cpuHistory && 
-                              global.cpuHistory.length > 0 && 
-                              global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
         
         if (inRecoveryPeriod) {
             // Use adaptive thresholds based on recovery factor
