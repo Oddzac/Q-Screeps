@@ -18,7 +18,7 @@ const spawnManager = {
         try {
             // Skip if no energy available for even the smallest creep
             if (room.energyAvailable < 250) {
-                if (Game.time % 10 === 0) {
+                if (Game.time % 50 === 0) {
                     console.log(`Room ${room.name} spawn blocked: insufficient energy (${room.energyAvailable}/250)`);
                 }
                 return;
@@ -38,7 +38,7 @@ const spawnManager = {
             };
             
             // Debug logging for creep counts
-            if (Game.time % 10 === 0) {
+            if (Game.time % 50 === 0) {
                 console.log(`Room ${room.name} current counts: H:${counts.harvester} Ha:${counts.hauler} U:${counts.upgrader} B:${counts.builder} T:${counts.total}`);
             }
             
@@ -57,7 +57,7 @@ const spawnManager = {
             // Use the first available spawn
             for (const spawn of spawns) {
                 if (spawn.spawning) {
-                    if (Game.time % 10 === 0) {
+                    if (Game.time % 50 === 0) {
                         console.log(`Room ${room.name} spawn blocked: spawn ${spawn.name} is busy (${spawn.spawning.remainingTime} ticks)`);
                     }
                     continue;
@@ -89,10 +89,10 @@ const spawnManager = {
                             
                         // Spawn the appropriate creep
                         this.spawnCreep(spawn, neededRole, energyToUse);
-                    } else if (Game.time % 10 === 0) {
+                    } else if (Game.time % 50 === 0) {
                         console.log(`Room ${room.name} spawn blocked: no needed role determined`);
                     }
-                } else if (Game.time % 10 === 0) {
+                } else if (Game.time % 50 === 0) {
                     console.log(`Room ${room.name} spawn blocked: CPU conditions (shouldExecute medium = false)`);
                 }
             }
