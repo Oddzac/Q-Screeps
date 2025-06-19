@@ -762,34 +762,34 @@ const roomManager = {
             }
         }
         
-        // Calculate total limit first based on RCL and sources
-        const totalLimit = Math.min(sourceCount * 4, rcl <= 2 ? 8 : (rcl <= 4 ? 12 : 15));
+        // Calculate requirements in priority order: Harvester -> Hauler -> Builder -> Upgrader
         
-        // Calculate base requirements
-        const baseHarvester = Math.min(sourceCount * 2, 4);
-        const baseUpgrader = rcl < 8 ? 1 : 1; // Only 1 upgrader for RCL 4
-        const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-        const baseBuilder = constructionSites > 0 ? 3 : 1; // 1 repairer + 2 builders when construction exists
+        // 1. Harvesters: Based on sources (2 per source, max 4)
+        const harvesterCount = Math.min(sourceCount * 2, 4);
         
-        // Calculate remaining capacity for haulers
-        const baseTotal = baseHarvester + baseUpgrader + baseBuilder;
-        const remainingCapacity = Math.max(1, totalLimit - baseTotal);
-        
-        // Calculate hauler count within remaining capacity
+        // 2. Haulers: Based on energy production and infrastructure needs
         const haulerBase = Math.ceil(energyPerTick / 50);
         const haulerDistance = Math.ceil(haulerBase * distanceFactor);
         const haulerInfra = sourceCount + storage + Math.min(1, controllerContainers);
         const rclFactor = rcl <= 2 ? 1.0 : (rcl <= 4 ? 1.2 : 1.5);
+        const haulerCount = Math.ceil(Math.max(haulerDistance, haulerInfra) * rclFactor);
         
-        const optimalHaulers = Math.ceil(Math.max(haulerDistance, haulerInfra) * rclFactor);
-        const actualHaulers = Math.min(optimalHaulers, remainingCapacity);
+        // 3. Builders: Based on construction and repair needs
+        const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
+        const builderCount = constructionSites > 0 ? 3 : 1; // 1 repairer + 2 builders when construction exists
+        
+        // 4. Upgraders: Minimal count, only 1 needed
+        const upgraderCount = 1;
+        
+        // Calculate total based on actual needs
+        const calculatedTotal = harvesterCount + haulerCount + builderCount + upgraderCount;
         
         const result = {
-            harvester: baseHarvester,
-            hauler: actualHaulers,
-            upgrader: baseUpgrader,
-            builder: baseBuilder,
-            total: totalLimit
+            harvester: harvesterCount,
+            hauler: haulerCount,
+            upgrader: upgraderCount,
+            builder: builderCount,
+            total: calculatedTotal
         };
         
         // Apply manual limits if set
@@ -808,22 +808,25 @@ const roomManager = {
             }
         }
         
-        // Apply manual limits if set (but maintain total constraint)
+        // Apply manual limits if set
         if (room.memory.creepLimits) {
             if (room.memory.creepLimits.harvester !== undefined) {
-                result.harvester = Math.min(room.memory.creepLimits.harvester, result.harvester);
+                result.harvester = room.memory.creepLimits.harvester;
             }
             if (room.memory.creepLimits.hauler !== undefined) {
-                result.hauler = Math.min(room.memory.creepLimits.hauler, result.hauler);
+                result.hauler = room.memory.creepLimits.hauler;
             }
             if (room.memory.creepLimits.upgrader !== undefined) {
-                result.upgrader = Math.min(room.memory.creepLimits.upgrader, result.upgrader);
+                result.upgrader = room.memory.creepLimits.upgrader;
             }
             if (room.memory.creepLimits.builder !== undefined) {
-                result.builder = Math.min(room.memory.creepLimits.builder, result.builder);
+                result.builder = room.memory.creepLimits.builder;
             }
             if (room.memory.creepLimits.total !== undefined) {
-                result.total = Math.min(result.total, room.memory.creepLimits.total);
+                result.total = room.memory.creepLimits.total;
+            } else {
+                // Recalculate total if individual limits were changed
+                result.total = result.harvester + result.hauler + result.upgrader + result.builder;
             }
         }
         
