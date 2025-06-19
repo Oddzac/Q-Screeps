@@ -764,8 +764,8 @@ const roomManager = {
         
         // Calculate requirements in priority order: Harvester -> Hauler -> Builder -> Upgrader
         
-        // 1. Harvesters: Based on sources (2 per source, max 4)
-        const harvesterCount = Math.min(sourceCount * 2, 4);
+        // 1. Harvesters: Calculate based on energy capacity and harvesting efficiency
+        const harvesterCount = this.calculateOptimalHarvesters(room, sourceCount);
         
         // 2. Haulers: Based on energy production and infrastructure needs
         const haulerBase = Math.ceil(energyPerTick / 50);
@@ -837,6 +837,35 @@ const roomManager = {
         };
         
         return result;
+    },
+    
+    /**
+     * Calculate optimal harvester count based on energy capacity and efficiency
+     * @param {Room} room - The room to analyze
+     * @param {number} sourceCount - Number of sources in the room
+     * @returns {number} - Optimal harvester count
+     */
+    calculateOptimalHarvesters: function(room, sourceCount) {
+        const energyCapacity = room.energyCapacityAvailable;
+        
+        // Calculate harvester body based on available energy (from spawnManager logic)
+        const harvesterSets = Math.floor(energyCapacity / 250); // Each set: 2 WORK, 1 CARRY, 1 MOVE
+        const workParts = Math.min(harvesterSets * 2, 32); // Cap at 32 WORK parts (16 sets)
+        
+        // Each WORK part harvests 2 energy per tick
+        const harvestPerTick = workParts * 2;
+        
+        // Source regenerates 10 energy per tick, max capacity 3000
+        const sourceRegenRate = 10;
+        
+        // Calculate how many harvesters needed per source to match regen rate
+        const harvestersPerSource = Math.ceil(sourceRegenRate / harvestPerTick);
+        
+        // Total harvesters needed
+        const totalHarvesters = sourceCount * harvestersPerSource;
+        
+        // Ensure at least 1 harvester per source, max 6 total
+        return Math.max(sourceCount, Math.min(totalHarvesters, 6));
     },
     
     /**
