@@ -840,32 +840,46 @@ const roomManager = {
     },
     
     /**
-     * Calculate optimal harvester count based on energy capacity and efficiency
+     * Calculate optimal harvester count based on current and potential energy capacity
      * @param {Room} room - The room to analyze
      * @param {number} sourceCount - Number of sources in the room
      * @returns {number} - Optimal harvester count
      */
     calculateOptimalHarvesters: function(room, sourceCount) {
-        const energyCapacity = room.energyCapacityAvailable;
+        // Get current harvesters and their actual work parts
+        const currentHarvesters = _.filter(Game.creeps, c => 
+            c.memory.role === 'harvester' && c.memory.homeRoom === room.name);
         
-        // Calculate harvester body based on available energy (from spawnManager logic)
-        const harvesterSets = Math.floor(energyCapacity / 250); // Each set: 2 WORK, 1 CARRY, 1 MOVE
-        const workParts = Math.min(harvesterSets * 2, 32); // Cap at 32 WORK parts (16 sets)
+        let currentWorkParts = 0;
+        for (const harvester of currentHarvesters) {
+            currentWorkParts += harvester.body.filter(part => part.type === WORK).length;
+        }
         
-        // Each WORK part harvests 2 energy per tick
-        const harvestPerTick = workParts * 2;
+        // Calculate current harvest rate (2 energy per WORK part per tick)
+        const currentHarvestRate = currentWorkParts * 2;
         
-        // Source regenerates 10 energy per tick, max capacity 3000
-        const sourceRegenRate = 10;
+        // Source regenerates 10 energy per tick per source
+        const totalSourceRegen = sourceCount * 10;
         
-        // Calculate how many harvesters needed per source to match regen rate
-        const harvestersPerSource = Math.ceil(sourceRegenRate / harvestPerTick);
+        // If current harvesters can't keep up with regen, we need more
+        if (currentHarvestRate < totalSourceRegen) {
+            // Calculate optimal work parts needed
+            const workPartsNeeded = Math.ceil(totalSourceRegen / 2);
+            
+            // Calculate what new harvesters would have (based on current energy capacity)
+            const energyCapacity = room.energyCapacityAvailable;
+            const harvesterSets = Math.floor(energyCapacity / 250);
+            const newHarvesterWorkParts = Math.min(harvesterSets * 2, 32);
+            
+            // Calculate how many more harvesters we need
+            const workPartsDeficit = workPartsNeeded - currentWorkParts;
+            const additionalHarvesters = Math.ceil(workPartsDeficit / newHarvesterWorkParts);
+            
+            return Math.min(currentHarvesters.length + additionalHarvesters, 6);
+        }
         
-        // Total harvesters needed
-        const totalHarvesters = sourceCount * harvestersPerSource;
-        
-        // Ensure at least 1 harvester per source, max 6 total
-        return Math.max(sourceCount, Math.min(totalHarvesters, 6));
+        // If we have enough harvest capacity, maintain current count but allow natural reduction
+        return Math.max(sourceCount, currentHarvesters.length);
     },
     
     /**
