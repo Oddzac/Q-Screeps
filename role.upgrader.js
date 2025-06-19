@@ -271,7 +271,8 @@ const roleUpgrader = {
                         if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > 10) {
                             const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
                             if (activeSources.length > 0) {
-                                source = creep.pos.findClosestByRange(activeSources);
+                                const utils = require('utils');
+                                source = utils.findBestSourceByAvailability(creep.room, activeSources);
                                 if (source) {
                                     creep.memory.energySourceId = source.id;
                                 }

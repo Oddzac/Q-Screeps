@@ -727,10 +727,11 @@ const roleBuilder = {
                 }
             }
             
-            // Priority 4: Active sources (last resort)
+            // Priority 4: Active sources (last resort) - choose best by availability
             const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
             if (activeSources.length > 0) {
-                source = creep.pos.findClosestByRange(activeSources);
+                const utils = require('utils');
+                source = utils.findBestSourceByAvailability(creep.room, activeSources);
                 if (source) {
                     creep.memory.energySourceId = source.id;
                     creep.memory.energySourceType = 'source';

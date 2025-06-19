@@ -487,4 +487,75 @@ const utils = {
     }
 };
 
+    /**
+     * Find the best source based on available harvesting positions
+     * @param {Room} room - The room to analyze
+     * @param {Array} sources - Array of sources to evaluate
+     * @returns {Object|null} - Best source or null
+     */
+    findBestSourceByAvailability: function(room, sources) {
+        if (!sources || sources.length === 0) return null;
+        if (sources.length === 1) return sources[0];
+        
+        let bestSource = null;
+        let bestScore = -1;
+        
+        for (const source of sources) {
+            const availableSpaces = this.countAvailableHarvestingSpaces(room, source);
+            const currentHarvesters = source.pos.findInRange(FIND_MY_CREEPS, 1, {
+                filter: c => c.memory.role === 'harvester' || 
+                           (c.memory.energySourceType === 'source' && c.memory.energySourceId === source.id)
+            }).length;
+            
+            // Score = available spaces - current harvesters (higher is better)
+            const score = availableSpaces - currentHarvesters;
+            
+            if (score > bestScore) {
+                bestScore = score;
+                bestSource = source;
+            }
+        }
+        
+        return bestSource;
+    },
+    
+    /**
+     * Count available harvesting spaces around a source
+     * @param {Room} room - The room
+     * @param {Source} source - The source to check
+     * @returns {number} - Number of available harvesting spaces
+     */
+    countAvailableHarvestingSpaces: function(room, source) {
+        const terrain = room.getTerrain();
+        let count = 0;
+        
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = source.pos.x + dx;
+                const y = source.pos.y + dy;
+                
+                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                
+                const terrainType = terrain.get(x, y);
+                
+                // Count plains and roads as available
+                if (terrainType !== TERRAIN_MASK_WALL) {
+                    // Check if there's a road structure
+                    const structures = room.lookForAt(LOOK_STRUCTURES, x, y);
+                    const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
+                    
+                    // Plains or road tiles are harvestable
+                    if (terrainType === 0 || hasRoad) { // 0 = plains
+                        count++;
+                    }
+                }
+            }
+        }
+        
+        return count;
+    }
+};
+
 module.exports = utils;

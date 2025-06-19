@@ -75,11 +75,14 @@ const roleHarvester = {
                 if (!source && Game.time % 10 === 0) { // Only try occasionally to save CPU
                     const sources = creep.room.find(FIND_SOURCES);
                     if (sources.length > 0) {
-                        source = sources[0];
-                        creep.memory.sourceId = source.id;
-                        creep.memory.sourcePos = {x: source.pos.x, y: source.pos.y, roomName: source.pos.roomName};
-                        utils.logError(`harvester_fallback_${creep.name}`, 
-                            `Using fallback source assignment: ${source.id}`, 100);
+                        // Use availability-based selection for fallback
+                        source = utils.findBestSourceByAvailability(creep.room, sources);
+                        if (source) {
+                            creep.memory.sourceId = source.id;
+                            creep.memory.sourcePos = {x: source.pos.x, y: source.pos.y, roomName: source.pos.roomName};
+                            utils.logError(`harvester_fallback_${creep.name}`, 
+                                `Using fallback source assignment: ${source.id}`, 100);
+                        }
                     }
                 }
                 

@@ -343,7 +343,7 @@ const roleHauler = {
             if (sources.storage && sources.storage.store[RESOURCE_ENERGY] > 100) {
                 allSources.push(sources.storage);
             }
-            
+        
             if (allSources.length > 0) {
                 // Find closest source of highest priority
                 let bestSource = null;
@@ -418,11 +418,16 @@ const roleHauler = {
     },
     
     /**
-     * Find non-energy resources in tombstones and containers
+     * Find non-energy resources in dropped resources, tombstones and containers
      * @param {Creep} creep - The hauler creep
      * @returns {Object|null} - Source with non-energy resources or null
      */
     findNonEnergyResources: function(creep) {
+        // Find dropped non-energy resources (highest priority)
+        const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES, {
+            filter: r => r.resourceType !== RESOURCE_ENERGY && r.amount > 0
+        });
+        
         // Find tombstones with non-energy resources
         const tombstones = creep.room.find(FIND_TOMBSTONES, {
             filter: t => {
@@ -441,8 +446,8 @@ const roleHauler = {
                       Object.keys(s.store).some(r => r !== RESOURCE_ENERGY && s.store[r] > 0)
         });
         
-        // Combine and find closest
-        const allSources = [...tombstones, ...containers];
+        // Combine in priority order: dropped > tombstones > containers
+        const allSources = [...droppedResources, ...tombstones, ...containers];
         if (allSources.length > 0) {
             return creep.pos.findClosestByRange(allSources);
         }
