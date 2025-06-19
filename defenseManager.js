@@ -166,7 +166,7 @@ const defenseManager = {
             if (this.towerAttack(tower)) continue;
             
             // Priority 3: Repair critical structures (only if tower has >80% energy)
-            if (tower.energy > tower.energyCapacity * 0.8) {
+            if (tower.energy > tower.energyCapacity * 0.6) {
                 this.towerRepair(tower);
             }
         }
