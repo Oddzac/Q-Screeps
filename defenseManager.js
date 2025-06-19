@@ -36,7 +36,10 @@ const defenseManager = {
             }
         }
         
-        // If no hostiles, nothing more to do
+        // Run tower operations regardless of hostiles (handles heal and repair)
+        this.runTowers(room);
+        
+        // Handle hostile-specific logic
         if (hostiles.length === 0) {
             if (room.memory.defense.threatLevel) {
                 console.log(`Room ${room.name} is now safe from player threats.`);
@@ -73,9 +76,6 @@ const defenseManager = {
                 console.log(`⚠️ HIGH THREAT in ${room.name}: Activating defense protocols!`);
             }
         }
-        
-        // Run tower operations (handles attack, heal, and repair)
-        this.runTowers(room);
         
         // Alert nearby rooms if needed
         if (threatLevel >= 3 && Game.time % 10 === 0) {
