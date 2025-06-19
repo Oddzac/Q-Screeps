@@ -484,9 +484,8 @@ const utils = {
         };
         
         return results;
-    }
-};
-
+    },
+    
     /**
      * Find the best source based on available harvesting positions
      * @param {Room} room - The room to analyze
