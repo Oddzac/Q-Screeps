@@ -119,9 +119,21 @@ const roleUpgrader = {
             const controllerContainer = roomManager.getRoomData(creep.room.name, 'controllerContainer');
             if (controllerContainer) {
                 const container = Game.getObjectById(controllerContainer);
-                if (container && container.store[RESOURCE_ENERGY] > creep.store.getFreeCapacity() / 2) {
+                if (container && container.store[RESOURCE_ENERGY] > 0) {
                     source = container;
                     creep.memory.energySourceId = container.id;
+                }
+            }
+            
+            // Also check for containers near controller
+            if (!source) {
+                const nearbyContainers = creep.pos.findInRange(FIND_STRUCTURES, 3, {
+                    filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                              s.store[RESOURCE_ENERGY] > 0
+                });
+                if (nearbyContainers.length > 0) {
+                    source = nearbyContainers[0];
+                    creep.memory.energySourceId = source.id;
                 }
             }
             

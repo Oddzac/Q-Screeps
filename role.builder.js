@@ -56,7 +56,7 @@ const roleBuilder = {
         }
         
         if (creep.memory.building) {
-            this.performBuilding(creep);
+            this.performTask(creep);
         } else {
             // When switching to harvesting mode, set a wait timer (only if not already harvesting)
             if (!creep.memory.waitStartTime && !creep.memory.harvestingStarted && creep.store[RESOURCE_ENERGY] === 0) {
@@ -78,10 +78,14 @@ const roleBuilder = {
     },
     
     /**
-     * Handle building and repairing
-     * @param {Creep} creep - The creep to perform building
+     * Perform assigned task
+     * @param {Creep} creep - The creep to perform task
      */
-    performBuilding: function(creep) {
+    performTask: function(creep) {
+        // Assign task if not set
+        if (!creep.memory.task) {
+            this.assignTask(creep);
+        }
         // Use cached target if available
         let target = null;
         
@@ -206,28 +210,41 @@ const roleBuilder = {
     },
     
     /**
-     * Assign repair role to the first builder in each room
-     * @param {Creep} creep - The creep to assign role to
+     * Assign task based on room needs and creep specialization
+     * @param {Creep} creep - The creep to assign task to
      */
-    assignRepairRole: function(creep) {
-        // Skip if already assigned
-        if (creep.memory.isRepairer !== undefined) return;
+    assignTask: function(creep) {
+        // Assign repair role if not set
+        if (creep.memory.isRepairer === undefined) {
+            const builders = creep.room.find(FIND_MY_CREEPS, {
+                filter: c => c.memory.role === 'builder'
+            });
+            const existingRepairer = builders.find(b => b.memory.isRepairer === true);
+            creep.memory.isRepairer = !existingRepairer;
+        }
         
-        // Get all builders in the room
-        const builders = creep.room.find(FIND_MY_CREEPS, {
-            filter: c => c.memory.role === 'builder'
+        // Find repair targets
+        const repairTargets = creep.room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax * 0.8 && 
+                      (s.structureType === STRUCTURE_CONTAINER || 
+                       s.structureType === STRUCTURE_SPAWN ||
+                       s.structureType === STRUCTURE_EXTENSION ||
+                       s.structureType === STRUCTURE_TOWER ||
+                       s.structureType === STRUCTURE_ROAD)
         });
         
-        // Check if there's already a repairer assigned
-        const existingRepairer = builders.find(b => b.memory.isRepairer === true);
+        // Find construction sites
+        const constructionSites = creep.room.find(FIND_CONSTRUCTION_SITES);
         
-        // If no repairer exists, assign this creep as repairer
-        if (!existingRepairer) {
-            creep.memory.isRepairer = true;
-            console.log(`${creep.name} assigned as dedicated repairer in room ${creep.room.name}`);
+        // Task assignment logic
+        if (creep.memory.isRepairer && repairTargets.length > 0) {
+            creep.memory.task = 'repairing';
+        } else if (constructionSites.length > 0) {
+            creep.memory.task = 'building';
+        } else if (repairTargets.length > 0) {
+            creep.memory.task = 'repairing';
         } else {
-            // Otherwise, this creep is a builder
-            creep.memory.isRepairer = false;
+            creep.memory.task = 'upgrading';
         }
     },
     

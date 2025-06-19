@@ -149,15 +149,17 @@ const roleHauler = {
             }
         }
         
-        // Check for towers that need energy (third priority)
-        if (targets.towers.length > 0) {
-            creep.memory.targetId = targets.towers[0].id;
+
+        
+        // Find controller containers (third priority - moved up)
+        if (targets.controllerContainers.length > 0) {
+            creep.memory.targetId = targets.controllerContainers[0].id;
             return;
         }
         
-        // Find controller containers (fourth priority)
-        if (targets.controllerContainers.length > 0) {
-            creep.memory.targetId = targets.controllerContainers[0].id;
+        // Check for towers that need energy (fourth priority - moved down)
+        if (targets.towers.length > 0) {
+            creep.memory.targetId = targets.towers[0].id;
             return;
         }
         

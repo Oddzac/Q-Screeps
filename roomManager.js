@@ -784,15 +784,9 @@ const roomManager = {
             total: 0
         };
         
-        // Adjust builder count based on construction sites and repair needs - always at least 1 for repairs
+        // Simplified builder logic: If construction sites exist: 3 builders (1 repair, 2 construction), else 1 builder (1 repair)
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-        const repairTargets = this.getRoomData(room.name, 'repairTargets') || 0;
-        
-        // Always have at least 1 builder for repairs (repairer), more if there are construction sites
-        // Base: 1 repairer + additional builders based on construction sites
-        const baseBuilders = 1; // Always 1 for repairs
-        const constructionBuilders = constructionSites > 0 ? Math.min(2, Math.max(1, Math.floor(constructionSites / 3))) : 0;
-        result.builder = Math.min(3, baseBuilders + constructionBuilders);
+        result.builder = constructionSites > 0 ? 3 : 1;
         
         // Apply manual limits if set
         if (room.memory.creepLimits) {
