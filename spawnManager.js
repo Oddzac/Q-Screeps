@@ -17,9 +17,9 @@ const spawnManager = {
         
         try {
             // Skip if no energy available for even the smallest creep
-            if (room.energyAvailable < 250) {
+            if (room.energyAvailable < 200) { // Minimum viable creep is 200 energy (1W+1C+1M)
                 if (Game.time % 50 === 0) {
-                    console.log(`Room ${room.name} spawn blocked: insufficient energy (${room.energyAvailable}/250)`);
+                    console.log(`Room ${room.name} spawn blocked: insufficient energy (${room.energyAvailable}/200)`);
                 }
                 return;
             }
@@ -63,18 +63,49 @@ const spawnManager = {
                     continue;
                 }
                 
-                // Emergency recovery - if no harvesters, spawn one immediately
+                // Emergency recovery - if no harvesters, spawn one immediately (no delay)
                 if (counts.harvester === 0) {
                     console.log(`Room ${room.name} emergency spawning harvester (0 harvesters)`);
                     this.spawnCreep(spawn, 'harvester', room.energyAvailable);
+                    // Clear any spawn delay data
+                    room.memory.spawnDelay = null;
                     return;
                 }
                 
                 // Emergency recovery - if no haulers but we have harvesters, spawn hauler
                 if (counts.harvester > 0 && counts.hauler === 0) {
+                    // For haulers, we might want to wait a bit for more energy if we're below 80%
+                    const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
+                    const shouldDelay = energyRatio < 0.8 && counts.total >= 2; // Only delay if we have at least 2 creeps
+                    
+                    // Initialize or update emergency hauler spawn delay
+                    if (shouldDelay) {
+                        if (!room.memory.emergencyHaulerDelay) {
+                            room.memory.emergencyHaulerDelay = {
+                                startTick: Game.time
+                            };
+                            console.log(`Room ${room.name} delaying emergency hauler spawn to accumulate energy (${Math.round(energyRatio * 100)}% of capacity)`);
+                            return;
+                        } else if (Game.time - room.memory.emergencyHaulerDelay.startTick < 20) { // Shorter delay (20 ticks) for emergency hauler
+                            if (Game.time % 10 === 0) {
+                                console.log(`Room ${room.name} still delaying emergency hauler spawn (${Math.round(energyRatio * 100)}% of capacity, ${20 - (Game.time - room.memory.emergencyHaulerDelay.startTick)} ticks remaining)`);
+                            }
+                            return;
+                        }
+                    }
+                    
+                    // Spawn hauler after delay or immediately if not delaying
                     console.log(`Room ${room.name} emergency spawning hauler (${counts.harvester} harvesters, 0 haulers)`);
                     this.spawnCreep(spawn, 'hauler', room.energyAvailable);
+                    // Clear delay data
+                    room.memory.emergencyHaulerDelay = null;
+                    room.memory.spawnDelay = null;
                     return;
+                }
+                
+                // Clear emergency hauler delay if we have haulers
+                if (room.memory.emergencyHaulerDelay && counts.hauler > 0) {
+                    room.memory.emergencyHaulerDelay = null;
                 }
                 
                 // Normal spawning - only if CPU conditions allow
@@ -82,15 +113,49 @@ const spawnManager = {
                     // Determine what role we need most
                     const neededRole = this.getNeededRole(room, counts);
                     if (neededRole) {
-                        // In emergency mode, spawn smaller creeps to save energy
-                        const energyToUse = global.emergencyMode ? 
-                            Math.min(room.energyAvailable, room.energyCapacityAvailable * 0.7) : 
-                            room.energyAvailable;
+                        // Check if we should delay spawning to accumulate more energy
+                        const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
+                        const shouldDelay = !criticalCollapse && energyRatio < 0.8;
+                        
+                        // Initialize or update spawn delay tracking
+                        if (!room.memory.spawnDelay) {
+                            room.memory.spawnDelay = {
+                                role: neededRole,
+                                startTick: Game.time,
+                                waiting: shouldDelay
+                            };
+                        } else if (room.memory.spawnDelay.role !== neededRole) {
+                            // Role changed, reset delay
+                            room.memory.spawnDelay = {
+                                role: neededRole,
+                                startTick: Game.time,
+                                waiting: shouldDelay
+                            };
+                        }
+                        
+                        // Check if we should spawn now
+                        const delayElapsed = Game.time - room.memory.spawnDelay.startTick >= 30;
+                        const spawnNow = !shouldDelay || delayElapsed || criticalCollapse;
+                        
+                        if (spawnNow) {
+                            // In emergency mode, spawn smaller creeps to save energy
+                            const energyToUse = global.emergencyMode ? 
+                                Math.min(room.energyAvailable, room.energyCapacityAvailable * 0.7) : 
+                                room.energyAvailable;
+                                
+                            // Spawn the appropriate creep
+                            this.spawnCreep(spawn, neededRole, energyToUse);
                             
-                        // Spawn the appropriate creep
-                        this.spawnCreep(spawn, neededRole, energyToUse);
+                            // Reset delay after spawning
+                            room.memory.spawnDelay = null;
+                        } else if (Game.time % 10 === 0) {
+                            // Log that we're waiting for more energy
+                            console.log(`Room ${room.name} delaying spawn of ${neededRole}: waiting for energy (${Math.round(energyRatio * 100)}% of capacity, ${30 - (Game.time - room.memory.spawnDelay.startTick)} ticks remaining)`);
+                        }
                     } else if (Game.time % 50 === 0) {
                         console.log(`Room ${room.name} spawn blocked: no needed role determined`);
+                        // Clear delay data when no role is needed
+                        room.memory.spawnDelay = null;
                     }
                 } else if (Game.time % 50 === 0) {
                     console.log(`Room ${room.name} spawn blocked: CPU conditions (shouldExecute medium = false)`);
@@ -101,7 +166,7 @@ const spawnManager = {
             
             // Emergency recovery - try to spawn a basic harvester if we have any spawn available
             const spawn = room.find(FIND_MY_SPAWNS)[0];
-            if (spawn && !spawn.spawning && room.energyAvailable >= 250) {
+            if (spawn && !spawn.spawning && room.energyAvailable >= 200) {
                 spawn.spawnCreep([WORK, CARRY, MOVE], 'emergency' + Game.time, {
                     memory: { role: 'harvester', homeRoom: room.name }
                 });
@@ -289,71 +354,72 @@ const spawnManager = {
             return this.bodyCache[cacheKey];
         }
         
-        // Minimum viable creep costs 250 energy (1 WORK, 1 CARRY, 1 MOVE)
-        if (energy < 250) return [];
+        // Minimum viable creep costs 200 energy (1 WORK, 1 CARRY, 1 MOVE)
+        if (energy < 200) return [];
         
-        let body;
+        let body = [];
         
         switch (role) {
             case 'harvester':
-                // Calculate harvester: 2 WORK + 1 CARRY + 1 MOVE = 250 energy per set
-                let harvesterSets = Math.floor(energy / 250);
-                harvesterSets = Math.min(harvesterSets, 12); // Cap at 48 parts max
+                // Harvester: 2 WORK per MOVE for efficiency, 1 CARRY for pickup
+                // Pattern: 2W + 1C + 1M = 250 energy per set
+                const harvesterSets = Math.min(Math.floor(energy / 250), 12); // Max 48 parts
+                const workParts = harvesterSets * 2;
+                const carryParts = harvesterSets;
+                const moveParts = harvesterSets;
                 
-                body = [];
-                for (let i = 0; i < harvesterSets; i++) {
-                    body.push(WORK, WORK, CARRY, MOVE);
-                }
+                // Optimal order: WORK parts first, then CARRY, then MOVE
+                for (let i = 0; i < workParts; i++) body.push(WORK);
+                for (let i = 0; i < carryParts; i++) body.push(CARRY);
+                for (let i = 0; i < moveParts; i++) body.push(MOVE);
                 
-                // Verify we don't exceed energy limit
-                const bodyCost = body.reduce((cost, part) => {
-                    return cost + (part === WORK ? 100 : 50);
-                }, 0);
-                
-                if (bodyCost > energy) {
-                    // Remove one set if over budget
-                    body = body.slice(0, -4);
-                }
-                
-                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum fallback
+                if (body.length === 0) body = [WORK, CARRY, MOVE];
                 break;
                 
             case 'hauler':
-                // Calculate hauler body properly
-                const haulerEnergy = energy - 100; // Reserve 100 for WORK part
-                if (haulerEnergy >= 100) { // Need at least 100 for 1 CARRY + 1 MOVE
-                    const carryMovePairs = Math.floor(haulerEnergy / 100); // Each pair costs 100
-                    const maxPairs = Math.min(carryMovePairs, 24); // Cap at 24 pairs (49 parts total with WORK)
-                    
-                    body = [WORK];
-                    for (let i = 0; i < maxPairs; i++) {
-                        body.push(CARRY, MOVE);
-                    }
-                } else {
-                    body = [CARRY, CARRY, MOVE]; // Minimum hauler without WORK
-                }
+                // Hauler: Pure transport, no WORK needed for efficiency
+                // Pattern: 2C + 1M = 150 energy per set (2:1 carry to move ratio)
+                const haulerSets = Math.min(Math.floor(energy / 150), 16); // Max 48 parts
+                const haulerCarry = haulerSets * 2;
+                const haulerMove = haulerSets;
+                
+                // Optimal order: CARRY parts first, then MOVE
+                for (let i = 0; i < haulerCarry; i++) body.push(CARRY);
+                for (let i = 0; i < haulerMove; i++) body.push(MOVE);
+                
+                if (body.length === 0) body = [CARRY, CARRY, MOVE];
                 break;
                 
             case 'upgrader':
-                // Calculate upgrader: 1 WORK + 1 CARRY + 1 MOVE (cost: 200 per set)
-                const upgraderSets = Math.floor(energy / 200);
-                const maxUpgraderSets = Math.min(upgraderSets, 16); // Cap at 48 parts
-                body = [];
-                for (let i = 0; i < maxUpgraderSets; i++) {
-                    body.push(WORK, CARRY, MOVE);
-                }
-                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum
+                // Upgrader: Balanced WORK/CARRY for continuous upgrading
+                // Pattern: 1W + 1C + 1M = 200 energy per set
+                const upgraderSets = Math.min(Math.floor(energy / 200), 16); // Max 48 parts
+                const upgraderWork = upgraderSets;
+                const upgraderCarry = upgraderSets;
+                const upgraderMove = upgraderSets;
+                
+                // Optimal order: WORK first, then CARRY, then MOVE
+                for (let i = 0; i < upgraderWork; i++) body.push(WORK);
+                for (let i = 0; i < upgraderCarry; i++) body.push(CARRY);
+                for (let i = 0; i < upgraderMove; i++) body.push(MOVE);
+                
+                if (body.length === 0) body = [WORK, CARRY, MOVE];
                 break;
                 
             case 'builder':
-                // Calculate builder: 1 WORK + 1 CARRY + 1 MOVE (cost: 200 per set)
-                const builderSets = Math.floor(energy / 200);
-                const maxBuilderSets = Math.min(builderSets, 16); // Cap at 48 parts
-                body = [];
-                for (let i = 0; i < maxBuilderSets; i++) {
-                    body.push(WORK, CARRY, MOVE);
-                }
-                if (body.length === 0) body = [WORK, CARRY, MOVE]; // Minimum
+                // Builder: Balanced for construction and repair
+                // Pattern: 1W + 1C + 1M = 200 energy per set
+                const builderSets = Math.min(Math.floor(energy / 200), 16); // Max 48 parts
+                const builderWork = builderSets;
+                const builderCarry = builderSets;
+                const builderMove = builderSets;
+                
+                // Optimal order: WORK first, then CARRY, then MOVE
+                for (let i = 0; i < builderWork; i++) body.push(WORK);
+                for (let i = 0; i < builderCarry; i++) body.push(CARRY);
+                for (let i = 0; i < builderMove; i++) body.push(MOVE);
+                
+                if (body.length === 0) body = [WORK, CARRY, MOVE];
                 break;
         }
         
@@ -364,6 +430,26 @@ const spawnManager = {
                 body = [CARRY, CARRY, MOVE];
             } else {
                 body = [WORK, CARRY, MOVE];
+            }
+        }
+        
+        // Validate body doesn't exceed 50 parts (game limit)
+        if (body.length > 50) {
+            body = body.slice(0, 50);
+        }
+        
+        // Verify we don't exceed energy limit
+        const actualCost = body.reduce((cost, part) => {
+            return cost + (part === WORK ? 100 : 50);
+        }, 0);
+        
+        if (actualCost > energy) {
+            console.log(`Warning: Body cost ${actualCost} exceeds available energy ${energy}`);
+            // This shouldn't happen with our calculations, but just in case
+            if (role === 'hauler') {
+                body = [CARRY, CARRY, MOVE]; // Minimum hauler
+            } else {
+                body = [WORK, CARRY, MOVE]; // Minimum for other roles
             }
         }
         
