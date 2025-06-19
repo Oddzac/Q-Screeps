@@ -296,9 +296,9 @@ const spawnManager = {
         
         switch (role) {
             case 'harvester':
-                // Calculate harvester: 2 WORK per 1 CARRY + 1 MOVE (cost: 250 per set)
+                // Calculate harvester: 2 WORK + 1 CARRY + 1 MOVE (cost: 250 per set)
                 const harvesterSets = Math.floor(energy / 250);
-                const maxHarvesterSets = Math.min(harvesterSets, 16); // Cap at 48 parts
+                const maxHarvesterSets = Math.min(harvesterSets, 12); // Cap at 48 parts (12 sets * 4 parts)
                 body = [];
                 for (let i = 0; i < maxHarvesterSets; i++) {
                     body.push(WORK, WORK, CARRY, MOVE);
