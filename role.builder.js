@@ -1092,7 +1092,6 @@ const roleBuilder = {
             creep.memory.lastSourceSearch = 0;
         }
     }
-    }
 };
 
 module.exports = roleBuilder;
