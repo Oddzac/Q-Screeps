@@ -37,6 +37,11 @@ const spawnManager = {
                 total: 0
             };
             
+            // Debug logging for creep counts
+            if (Game.time % 10 === 0) {
+                console.log(`Room ${room.name} current counts: H:${counts.harvester} Ha:${counts.hauler} U:${counts.upgrader} B:${counts.builder} T:${counts.total}`);
+            }
+            
             // Colony collapse prevention - if critical roles are missing, force spawn
             const criticalCollapse = counts.harvester === 0 || 
                                     (counts.harvester > 0 && counts.hauler === 0);
@@ -51,16 +56,23 @@ const spawnManager = {
             
             // Use the first available spawn
             for (const spawn of spawns) {
-                if (spawn.spawning) continue;
+                if (spawn.spawning) {
+                    if (Game.time % 10 === 0) {
+                        console.log(`Room ${room.name} spawn blocked: spawn ${spawn.name} is busy (${spawn.spawning.remainingTime} ticks)`);
+                    }
+                    continue;
+                }
                 
                 // Emergency recovery - if no harvesters, spawn one immediately
                 if (counts.harvester === 0) {
+                    console.log(`Room ${room.name} emergency spawning harvester (0 harvesters)`);
                     this.spawnCreep(spawn, 'harvester', room.energyAvailable);
                     return;
                 }
                 
                 // Emergency recovery - if no haulers but we have harvesters, spawn hauler
                 if (counts.harvester > 0 && counts.hauler === 0) {
+                    console.log(`Room ${room.name} emergency spawning hauler (${counts.harvester} harvesters, 0 haulers)`);
                     this.spawnCreep(spawn, 'hauler', room.energyAvailable);
                     return;
                 }
