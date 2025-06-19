@@ -17,7 +17,12 @@ const spawnManager = {
         
         try {
             // Skip if no energy available for even the smallest creep
-            if (room.energyAvailable < 250) return;
+            if (room.energyAvailable < 250) {
+                if (Game.time % 10 === 0) {
+                    console.log(`Room ${room.name} spawn blocked: insufficient energy (${room.energyAvailable}/250)`);
+                }
+                return;
+            }
             
             // Find all spawns in the room - use cached data if available
             const spawns = room.find(FIND_MY_SPAWNS);
@@ -72,7 +77,11 @@ const spawnManager = {
                             
                         // Spawn the appropriate creep
                         this.spawnCreep(spawn, neededRole, energyToUse);
+                    } else if (Game.time % 10 === 0) {
+                        console.log(`Room ${room.name} spawn blocked: no needed role determined`);
                     }
+                } else if (Game.time % 10 === 0) {
+                    console.log(`Room ${room.name} spawn blocked: CPU conditions (shouldExecute medium = false)`);
                 }
             }
         } catch (error) {
