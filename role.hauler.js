@@ -105,7 +105,7 @@ const roleHauler = {
         
         // Check for builder energy requests (second priority)
         if (room.memory.energyRequests && Object.keys(room.memory.energyRequests).length > 0) {
-            // Find the highest priority builder request
+            // Find the highest priority builder request we can fulfill in time
             let bestRequest = null;
             let bestScore = Infinity;
             
@@ -117,7 +117,11 @@ const roleHauler = {
                     continue;
                 }
                 
-                // Calculate score based on priority and distance
+                // Skip repair requests (they don't need energy delivery)
+                if (request.task === 'repairing') {
+                    continue;
+                }
+                
                 const builder = Game.getObjectById(requestId);
                 if (!builder) {
                     // Clean up invalid requests
@@ -125,13 +129,21 @@ const roleHauler = {
                     continue;
                 }
                 
-                // Calculate score (lower is better)
+                // Calculate travel time to builder
                 const distance = creep.pos.getRangeTo(builder);
+                const travelTime = Math.ceil(distance / 2); // Assume 2 tiles per tick movement
+                
+                // Calculate request timeout (30 ticks from wait start)
                 const waitTime = Game.time - (request.waitStartTime || request.timestamp);
+                const timeUntilTimeout = 30 - waitTime;
                 
-                // Factor in wait time - longer wait = higher priority (lower score)
-                const waitFactor = Math.max(0, 20 - waitTime) * 2; // Reduce score by up to 40 points for waiting
+                // Skip if we can't arrive before timeout
+                if (travelTime >= timeUntilTimeout) {
+                    continue;
+                }
                 
+                // Calculate score (lower is better)
+                const waitFactor = Math.max(0, 20 - waitTime) * 2;
                 const score = request.priority + (distance * 0.5) - waitFactor;
                 
                 if (score < bestScore) {

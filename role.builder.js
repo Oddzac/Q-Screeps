@@ -36,8 +36,10 @@ const roleBuilder = {
             // Clear target cache when switching states
             delete creep.memory.targetId;
             delete creep.memory.targetPos;
-            // Register energy request when switching to harvesting
-            this.registerEnergyRequest(creep);
+            // Register energy request when switching to harvesting (but not for repair tasks)
+            if (creep.memory.task !== 'repairing') {
+                this.registerEnergyRequest(creep);
+            }
         }
         if (!creep.memory.building && creep.store.getFreeCapacity() === 0) {
             creep.memory.building = true;
@@ -50,8 +52,8 @@ const roleBuilder = {
             this.clearEnergyRequest(creep);
         }
         
-        // Register energy request if below 25% capacity while building
-        if (creep.memory.building && 
+        // Register energy request if below 70% capacity while building (but not repairing)
+        if (creep.memory.building && creep.memory.task !== 'repairing' &&
             creep.store[RESOURCE_ENERGY] < creep.store.getCapacity() * 0.70) {
             this.registerEnergyRequest(creep);
         }
