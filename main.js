@@ -334,6 +334,7 @@ global.showCreeps = function(roomName) {
     }
     
     const roomManager = require('roomManager');
+    const spawnManager = require('spawnManager');
     
     // Get current counts
     const counts = roomManager.getRoomData(roomName, 'creepCounts') || {
@@ -356,16 +357,88 @@ global.showCreeps = function(roomName) {
     // Get manual limits
     const manualLimits = room.memory.creepLimits || {};
     
+    // Room overview
+    const sources = Object.keys(room.memory.sources || {}).length;
+    const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
+    const repairTargets = roomManager.getRoomData(roomName, 'repairTargets') || 0;
+    const energyRequests = Object.keys(room.memory.energyRequests || {}).length;
+    
+    // Spawn status
+    const spawns = room.find(FIND_MY_SPAWNS);
+    const busySpawns = spawns.filter(s => s.spawning).length;
+    
+    // Get next spawn intent
+    const neededRole = spawnManager.getNeededRole(room, counts);
+    
     // Format output
-    let output = `Creep Status for Room ${roomName} (RCL ${room.controller.level}):\n`;
-    output += `Role       | Current | Auto Limit | Manual Limit\n`;
-    output += `-----------|---------|-----------|-------------\n`;
-    output += `Harvester  | ${counts.harvester.toString().padEnd(7)} | ${limits.harvester.toString().padEnd(9)} | ${(manualLimits.harvester !== undefined ? manualLimits.harvester : '-').toString().padEnd(11)}\n`;
-    output += `Hauler     | ${counts.hauler.toString().padEnd(7)} | ${limits.hauler.toString().padEnd(9)} | ${(manualLimits.hauler !== undefined ? manualLimits.hauler : '-').toString().padEnd(11)}\n`;
-    output += `Upgrader   | ${counts.upgrader.toString().padEnd(7)} | ${limits.upgrader.toString().padEnd(9)} | ${(manualLimits.upgrader !== undefined ? manualLimits.upgrader : '-').toString().padEnd(11)}\n`;
-    output += `Builder    | ${counts.builder.toString().padEnd(7)} | ${limits.builder.toString().padEnd(9)} | ${(manualLimits.builder !== undefined ? manualLimits.builder : '-').toString().padEnd(11)}\n`;
-    output += `-----------|---------|-----------|-------------\n`;
-    output += `Total      | ${counts.total.toString().padEnd(7)} | ${limits.total.toString().padEnd(9)} | ${(manualLimits.total !== undefined ? manualLimits.total : '-').toString().padEnd(11)}\n`;
+    let output = `=== Room ${roomName} Overview (RCL ${room.controller.level}) ===\n`;
+    output += `Energy: ${room.energyAvailable}/${room.energyCapacityAvailable} | Sources: ${sources} | Construction: ${constructionSites} | Repairs: ${repairTargets}\n`;
+    output += `Energy Requests: ${energyRequests} | Spawns: ${spawns.length - busySpawns}/${spawns.length} available\n`;
+    if (neededRole) {
+        output += `Next Spawn: ${neededRole}\n`;
+    } else if (counts.total >= limits.total) {
+        output += `Next Spawn: At capacity\n`;
+    } else {
+        output += `Next Spawn: No priority role identified\n`;
+    }
+    output += `\n`;
+    
+    // Creep counts table
+    output += `Role       | Current | Auto Limit | Manual Limit | Status\n`;
+    output += `-----------|---------|-----------|-------------|--------\n`;
+    
+    const roles = ['harvester', 'hauler', 'upgrader', 'builder'];
+    for (const role of roles) {
+        const current = counts[role];
+        const autoLimit = limits[role];
+        const manualLimit = manualLimits[role] !== undefined ? manualLimits[role] : '-';
+        
+        let status = '';
+        if (current === 0) status = 'CRITICAL';
+        else if (current < autoLimit * 0.5) status = 'LOW';
+        else if (current >= autoLimit) status = 'FULL';
+        else status = 'OK';
+        
+        const roleName = role.charAt(0).toUpperCase() + role.slice(1);
+        output += `${roleName.padEnd(10)} | ${current.toString().padEnd(7)} | ${autoLimit.toString().padEnd(9)} | ${manualLimit.toString().padEnd(11)} | ${status}\n`;
+    }
+    
+    output += `-----------|---------|-----------|-------------|--------\n`;
+    output += `Total      | ${counts.total.toString().padEnd(7)} | ${limits.total.toString().padEnd(9)} | ${(manualLimits.total !== undefined ? manualLimits.total : '-').toString().padEnd(11)} | ${counts.total >= limits.total ? 'FULL' : 'OK'}\n`;
+    
+    // Individual creep details
+    const creeps = _.filter(Game.creeps, c => c.memory.homeRoom === roomName);
+    if (creeps.length > 0) {
+        output += `\n=== Individual Creeps ===\n`;
+        const creepsByRole = _.groupBy(creeps, c => c.memory.role);
+        
+        for (const role of roles) {
+            if (creepsByRole[role]) {
+                output += `\n${role.toUpperCase()}S (${creepsByRole[role].length}):\n`;
+                for (const creep of creepsByRole[role]) {
+                    const energy = `${creep.store[RESOURCE_ENERGY]}/${creep.store.getCapacity()}`;
+                    const parts = creep.body.length;
+                    const age = Game.time - (creep.memory.spawnTime || Game.time);
+                    const ttl = creep.ticksToLive || 'N/A';
+                    
+                    let status = '';
+                    if (role === 'harvester' && creep.memory.sourceId) {
+                        status = `Source: ${creep.memory.sourceId.slice(-3)}`;
+                    } else if (role === 'hauler' && creep.memory.assignedRequestId) {
+                        status = `Assigned: ${creep.memory.assignedRequestId.slice(-3)}`;
+                    } else if (role === 'builder') {
+                        const task = creep.memory.task || 'none';
+                        const isRepairer = creep.memory.isRepairer ? ' (R)' : '';
+                        status = `${task}${isRepairer}`;
+                    } else if (role === 'upgrader') {
+                        status = creep.memory.working ? 'upgrading' : 'collecting';
+                    }
+                    
+                    output += `  ${creep.name}: ${energy} energy, ${parts} parts, TTL:${ttl}, ${status}\n`;
+                }
+            }
+        }
+    }
     
     return output;
 };
