@@ -313,14 +313,6 @@ const roleBuilder = {
      * @returns {boolean} - Whether the creep is stuck
      */
     isStuck: function(creep) {
-        // Check if targeting controller and is a repairer but not in upgrading task
-        if (creep.memory.isRepairer === true && 
-            creep.memory.targetId === creep.room.controller.id && 
-            creep.memory.task !== 'upgrading') {
-            console.log(`Repairer ${creep.name} is stuck targeting controller but not in upgrading task`);
-            return true;
-        }
-        
         // Check if has error count
         if (creep.memory.errorCount && creep.memory.errorCount >= 2) {
             console.log(`Builder ${creep.name} is stuck with ${creep.memory.errorCount} errors`);
