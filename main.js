@@ -5,6 +5,10 @@ const roleHarvester = require('role.harvester');
 const roleUpgrader = require('role.upgrader');
 const roleBuilder = require('role.builder');
 const roleHauler = require('role.hauler');
+const roleScout = require('role.scout');
+const roleReserver = require('role.reserver');
+const roleRemoteMiner = require('role.remoteMiner');
+const roleRemoteHauler = require('role.remoteHauler');
 const roomManager = require('roomManager');
 const spawnManager = require('spawnManager');
 const constructionManager = require('constructionManager');
@@ -121,7 +125,7 @@ global.setCreepLimits = function(roomName, role, limit) {
     }
     
     // Validate role
-    const validRoles = ['harvester', 'hauler', 'upgrader', 'builder', 'total'];
+    const validRoles = ['harvester', 'hauler', 'upgrader', 'builder', 'scout', 'reserver', 'remoteMiner', 'remoteHauler', 'total'];
     if (!validRoles.includes(role)) {
         return `Invalid role. Must be one of: ${validRoles.join(', ')}`;
     }
@@ -145,6 +149,113 @@ global.toggleTrafficVisualization = function() {
 };
 
 // Global function to check CPU recovery status
+global.checkRecovery = function() {
+    // Get detailed status from recovery manager
+    const status = recoveryManager.getStatus();
+};
+
+// Global function to manage remote operations
+global.manageRemotes = function(roomName, action, targetRoom) {
+    // Validate room
+    const room = Game.rooms[roomName];
+    if (!room || !room.controller || !room.controller.my) {
+        return `Room ${roomName} not found or not owned by you`;
+    }
+    
+    // Initialize remote ops memory if needed
+    if (!Memory.remoteOps) {
+        Memory.remoteOps = {
+            rooms: {},
+            activeRemotes: {}
+        };
+    }
+    
+    // Initialize active remotes for this room
+    if (!Memory.remoteOps.activeRemotes[roomName]) {
+        Memory.remoteOps.activeRemotes[roomName] = [];
+    }
+    
+    switch(action) {
+        case 'list':
+            // List active remote rooms
+            const activeRemotes = Memory.remoteOps.activeRemotes[roomName] || [];
+            if (activeRemotes.length === 0) {
+                return `Room ${roomName} has no active remote operations`;
+            }
+            
+            let output = `Active remote operations for ${roomName}:\n`;
+            for (const remoteName of activeRemotes) {
+                const remoteData = Memory.remoteOps.rooms[remoteName] || {};
+                output += `- ${remoteName}: ${remoteData.sources || 0} sources`;
+                if (remoteData.hostiles) output += `, HOSTILES PRESENT`;
+                if (remoteData.reservation) {
+                    output += `, reserved by ${remoteData.reservation.username} (${remoteData.reservation.ticksToEnd} ticks)`;
+                }
+                output += '\n';
+            }
+            return output;
+            
+        case 'add':
+            // Add a remote room
+            if (!targetRoom) {
+                return `Must specify a target room to add`;
+            }
+            
+            // Check if already active
+            if (Memory.remoteOps.activeRemotes[roomName].includes(targetRoom)) {
+                return `Room ${targetRoom} is already an active remote for ${roomName}`;
+            }
+            
+            // Add to active remotes
+            Memory.remoteOps.activeRemotes[roomName].push(targetRoom);
+            
+            // Initialize remote room data if needed
+            if (!Memory.remoteOps.rooms[targetRoom]) {
+                Memory.remoteOps.rooms[targetRoom] = {
+                    baseRoom: roomName,
+                    lastScout: 0,
+                    sources: 0,
+                    hostiles: false,
+                    mining: true
+                };
+            } else {
+                Memory.remoteOps.rooms[targetRoom].mining = true;
+                Memory.remoteOps.rooms[targetRoom].baseRoom = roomName;
+            }
+            
+            return `Added ${targetRoom} as remote operation for ${roomName}`;
+            
+        case 'remove':
+            // Remove a remote room
+            if (!targetRoom) {
+                return `Must specify a target room to remove`;
+            }
+            
+            // Check if active
+            const index = Memory.remoteOps.activeRemotes[roomName].indexOf(targetRoom);
+            if (index === -1) {
+                return `Room ${targetRoom} is not an active remote for ${roomName}`;
+            }
+            
+            // Remove from active remotes
+            Memory.remoteOps.activeRemotes[roomName].splice(index, 1);
+            
+            // Update remote room data
+            if (Memory.remoteOps.rooms[targetRoom]) {
+                Memory.remoteOps.rooms[targetRoom].mining = false;
+            }
+            
+            return `Removed ${targetRoom} as remote operation for ${roomName}`;
+            
+        case 'status':
+            // Show detailed status of remote operations
+            return remoteManager.getDetailedStatus(roomName);
+            
+        default:
+            return `Unknown action: ${action}. Valid actions are: list, add, remove, status`;
+    }
+};
+
 global.checkRecovery = function() {
     // Get detailed status from recovery manager
     const status = recoveryManager.getStatus();
@@ -720,7 +831,11 @@ module.exports.loop = function() {
             harvester: [],
             hauler: [],
             upgrader: [],
-            builder: []
+            builder: [],
+            scout: [],
+            reserver: [],
+            remoteMiner: [],
+            remoteHauler: []
         };
         
         // Sort creeps by role
@@ -803,6 +918,12 @@ module.exports.loop = function() {
     
     // Process builders last as they're less critical
     processCreepRole(creepsByRole.builder, roleBuilder, 'low');
+    
+    // Process remote operation roles
+    processCreepRole(creepsByRole.scout, roleScout, 'low');
+    processCreepRole(creepsByRole.reserver, roleReserver, 'low');
+    processCreepRole(creepsByRole.remoteMiner, roleRemoteMiner, 'low');
+    processCreepRole(creepsByRole.remoteHauler, roleRemoteHauler, 'low');
     
     global.stats.cpu.creepActions = Game.cpu.getUsed() - creepStart;
     
