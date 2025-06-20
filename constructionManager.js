@@ -53,6 +53,32 @@ const constructionManagerImpl = {
         // Check if room has evolved and needs plan updates
         this.checkRoomEvolution(room);
         
+        // Check if we need to generate a complete room plan
+        if (!room.memory.roomPlan && (force || Game.time % 500 === 0)) {
+            console.log(`Generating complete room plan for ${room.name}`);
+            this.generateRoomPlan(room);
+            // Visualize the plan
+            this.visualizeRoomPlan(room);
+            return; // Only do one major planning operation per tick
+        }
+        
+        // If we have a room plan, use it for construction
+        if (room.memory.roomPlan) {
+            // Create construction sites based on the room plan
+            this.createConstructionSitesFromPlan(room);
+            
+            // Update timestamp
+            room.memory.construction.lastUpdate = Game.time;
+            
+            // Periodically visualize the plan
+            if (Game.time % 100 === 0) {
+                this.visualizeRoomPlan(room, room.controller.level);
+            }
+            
+            return;
+        }
+        
+        // Legacy planning logic for rooms without a complete plan
         // Ensure all required construction memory properties exist
         if (!room.memory.construction.roads) room.memory.construction.roads = { planned: false };
         if (!room.memory.construction.extensions) room.memory.construction.extensions = { planned: false, count: 0 };
@@ -100,7 +126,6 @@ const constructionManagerImpl = {
         room.memory.construction.lastUpdate = Game.time;
         
         // Log construction status
-        
         if (force || Game.time % (isSimulation ? 20 : 100) === 0) {
             console.log(`Construction status for ${room.name}: ` +
                 `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
@@ -108,7 +133,6 @@ const constructionManagerImpl = {
                 `Containers: ${room.memory.construction.containers && room.memory.construction.containers.planned ? 'Planned' : 'Not Planned'}, ` +
                 `RCL: ${room.controller.level}`
             );
-            
             
             // In simulation, log more detailed information
             if (isSimulation) {
@@ -119,7 +143,6 @@ const constructionManagerImpl = {
                     `Construction sites: ${room.find(FIND_CONSTRUCTION_SITES).length}`
                 );
             }
-
         }
         
     },
@@ -900,6 +923,51 @@ const constructionManagerImpl = {
     },
     
     /**
+     * Generate a complete room plan using the room planner
+     * @param {Room} room - The room to plan
+     */
+    generateRoomPlan: function(room) {
+        const roomPlanner = require('roomPlanner');
+        
+        // Generate the complete room plan
+        const plan = roomPlanner.generateRoomPlan(room);
+        
+        if (!plan) {
+            console.log(`Failed to generate room plan for ${room.name}`);
+            return false;
+        }
+        
+        // Store the plan in room memory
+        room.memory.roomPlan = plan;
+        
+        // Mark all structure types as planned
+        room.memory.construction = room.memory.construction || {};
+        room.memory.construction.planned = true;
+        room.memory.construction.lastRCL = room.controller.level;
+        room.memory.construction.lastUpdate = Game.time;
+        
+        console.log(`Generated complete room plan for ${room.name} from RCL 1 to 8`);
+        return true;
+    },
+    
+    /**
+     * Visualize the room plan
+     * @param {Room} room - The room to visualize
+     * @param {number} rcl - RCL level to visualize (0 for all levels)
+     */
+    visualizeRoomPlan: function(room, rcl = 0) {
+        const roomPlanner = require('roomPlanner');
+        
+        if (!room.memory.roomPlan) {
+            console.log(`No room plan exists for ${room.name}. Generate a plan first.`);
+            return false;
+        }
+        
+        roomPlanner.visualize(room, room.memory.roomPlan, rcl);
+        return true;
+    },
+    
+    /**
      * Check if room has evolved and needs plan updates
      * @param {Room} room - The room to check
      */
@@ -912,10 +980,18 @@ const constructionManagerImpl = {
             room.memory.construction.lastRCL = room.controller.level;
         }
         
-        // If RCL has increased, reset some plans to adapt to new capabilities
+        // If RCL has increased, update construction plans
         if (room.controller.level > room.memory.construction.lastRCL) {
             console.log(`Room ${room.name} evolved from RCL ${room.memory.construction.lastRCL} to ${room.controller.level}, updating construction plans`);
             
+            // If we have a room plan, we don't need to replan individual structures
+            if (room.memory.roomPlan) {
+                // Just update the RCL level
+                room.memory.construction.lastRCL = room.controller.level;
+                return;
+            }
+            
+            // Legacy planning logic for rooms without a complete plan
             // Reset extension planning when reaching RCL 2, 3, 4, etc.
             if ((room.controller.level >= 2 && room.memory.construction.lastRCL < 2) ||
                 (room.controller.level >= 3 && room.memory.construction.lastRCL < 3) ||
@@ -1037,14 +1113,12 @@ const constructionManagerImpl = {
         
         return bestPos;
     },
-    
 
-    
     /**
-     * Create construction sites based on plans
+     * Create construction sites based on the room plan
      * @param {Room} room - The room to create construction sites in
      */
-    createConstructionSites: function(room) {
+    createConstructionSitesFromPlan: function(room) {
         // Check for global construction site limit
         const globalSiteCount = Object.keys(Game.constructionSites).length;
         const TARGET_SITES_PER_ROOM = 5; // We want to maintain 5 sites at all times
@@ -1069,22 +1143,11 @@ const constructionManagerImpl = {
             MAX_GLOBAL_SITES - globalSiteCount
         );
         
-        // Track what types of construction sites we already have
-        const existingSiteTypes = {};
-        for (const site of existingSites) {
-            existingSiteTypes[site.structureType] = (existingSiteTypes[site.structureType] || 0) + 1;
-        }
+        // Get the room plan for the current RCL
+        const plan = room.memory.roomPlan;
+        if (!plan || !plan.rcl || !plan.rcl[room.controller.level]) return;
         
-        // Only log if we're actually going to create sites
-        if (sitesToPlace > 0) {
-            console.log(`Room ${room.name} has ${existingSites.length} construction sites, creating ${sitesToPlace} more to reach target of ${TARGET_SITES_PER_ROOM}`);
-        }
-        
-        // Determine if we should prioritize non-road structures
-        // If we already have mostly road construction sites, prioritize other structures
-        const roadSites = existingSiteTypes[STRUCTURE_ROAD] || 0;
-        const prioritizeNonRoads = roadSites > 0 && roadSites / existingSites.length > 0.5;
-        let sitesPlaced = 0;
+        const rclPlan = plan.rcl[room.controller.level];
         
         // Create a map of existing structures for faster lookups
         const structureMap = new Map();
@@ -1101,399 +1164,85 @@ const constructionManagerImpl = {
             siteMap.set(key, true);
         }
         
-        // Define the order of structure creation based on our prioritization logic
-        // If we've been trying roads for too many consecutive ticks without success, force non-road structures
-        if (!room.memory.construction.lastNonRoadTick) {
-            room.memory.construction.lastNonRoadTick = Game.time;
-        }
+        // Define priority order for structure types
+        const structurePriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_TOWER,
+            STRUCTURE_STORAGE,
+            STRUCTURE_ROAD,
+            STRUCTURE_LINK,
+            STRUCTURE_TERMINAL,
+            STRUCTURE_LAB,
+            STRUCTURE_FACTORY,
+            STRUCTURE_OBSERVER,
+            STRUCTURE_POWER_SPAWN,
+            STRUCTURE_NUKER
+        ];
         
-        // Track the last structure type we attempted to place
-        if (!room.memory.construction.lastStructureType) {
-            room.memory.construction.lastStructureType = 'containers';
-        }
+        let sitesPlaced = 0;
         
-        // Initialize tracking for sites placed by type
-        let sitesPlacedForRoads = 0;
-        let sitesPlacedForContainers = 0;
-        let sitesPlacedForExtensions = 0;
-        let sitesPlacedForTowers = 0;
-        let sitesPlacedForStorage = 0;
-        
-        // If we haven't placed a non-road structure in 100 ticks, force non-road priority
-        const forceNonRoads = Game.time - (room.memory.construction.lastNonRoadTick || 0) > 100;
-        
-        // Define the base structure order
-        const baseStructureOrder = prioritizeNonRoads || forceNonRoads ? 
-            ['containers', 'extensions', 'towers', 'storage', 'roads'] : 
-            ['containers', 'extensions', 'roads', 'towers', 'storage'];
+        // Process each structure type in priority order
+        for (const structureType of structurePriority) {
+            // Skip if we've placed enough sites
+            if (sitesPlaced >= sitesToPlace) break;
             
-        // Rotate the structure order to start with the next type after the last one we tried
-        // This ensures we cycle through all structure types even if one type is stuck
-        const lastIndex = baseStructureOrder.indexOf(room.memory.construction.lastStructureType);
-        const structureOrder = lastIndex >= 0 ? 
-            [...baseStructureOrder.slice(lastIndex + 1), ...baseStructureOrder.slice(0, lastIndex + 1)] :
-            baseStructureOrder;
+            // Skip if this structure type isn't in the plan
+            if (!rclPlan.structures[structureType] || rclPlan.structures[structureType].length === 0) continue;
             
-        // Log construction plan if forced or periodically
-        if (forceNonRoads || Game.time % 100 === 0) {
-            console.log(`Room ${room.name} construction plan: ${structureOrder.join(' → ')}${forceNonRoads ? ' (forced non-road priority)' : ''}`);
-        }
+            // Get the maximum allowed structures of this type
+            const maxStructures = rclPlan.maxStructures[structureType] || 0;
+            if (maxStructures === 0) continue;
             
-        // Process each structure type in order
-        let structureIndex = 0;
-        while (structureIndex < structureOrder.length && sitesPlaced < sitesToPlace) {
-            const structureType = structureOrder[structureIndex];
-            let sitesPreviouslyPlaced = sitesPlaced;
+            // Count existing structures of this type
+            const existingCount = _.filter(structures, s => s.structureType === structureType).length;
             
-            // Track sites placed before attempting this structure type
-            const previousRoadSites = sitesPlacedForRoads;
-            const previousContainerSites = sitesPlacedForContainers;
-            const previousExtensionSites = sitesPlacedForExtensions;
-            const previousTowerSites = sitesPlacedForTowers;
-            const previousStorageSites = sitesPlacedForStorage;
+            // Skip if we've already built all allowed structures of this type
+            if (existingCount >= maxStructures) continue;
             
-            // Create container construction sites
-            if (structureType === 'containers' && 
-                room.memory.construction && room.memory.construction.containers && 
-                room.memory.construction.containers.planned && 
-                room.memory.construction.containers.positions) {
+            // Get planned positions for this structure type
+            const positions = rclPlan.structures[structureType];
+            
+            // Try to place construction sites for this structure type
+            for (let i = 0; i < positions.length && sitesPlaced < sitesToPlace; i++) {
+                const pos = positions[i];
                 
-                const containerPositions = room.memory.construction.containers.positions;
-                const newContainerPositions = [];
+                // Skip if out of bounds
+                if (pos.x < 0 || pos.x > 49 || pos.y < 0 || pos.y > 49) continue;
                 
-                for (let i = 0; i < containerPositions.length && sitesPlaced < sitesToPlace; i++) {
-                    const pos = containerPositions[i];
-                    
-                    // Check if there's already a container or construction site here
-                    const containerKey = `${pos.x},${pos.y},${STRUCTURE_CONTAINER}`;
-                    const hasContainer = structureMap.has(containerKey);
-                    const hasContainerSite = siteMap.has(containerKey);
-                    
-                    // Create container construction site if needed
-                    if (!hasContainer && !hasContainerSite) {
-                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
-                        if (result === OK) {
-                            sitesPlaced++;
-                            sitesPlacedForContainers++;
-                            console.log(`Created container construction site at (${pos.x},${pos.y})`);
-                            
-                            // Add to site map to prevent duplicates
-                            siteMap.set(containerKey, true);
-                            
-                            // Update the timestamp of last non-road structure placement
-                            room.memory.construction.lastNonRoadTick = Game.time;
-                        }
-                    }
-                    
-                    // Keep this position in the plan if container doesn't exist yet
-                    if (!hasContainer) {
-                        newContainerPositions.push(pos);
-                    }
-                }
-                
-                // Update container positions in memory
-                room.memory.construction.containers.positions = newContainerPositions;
-                
-                // Check if we placed any sites for this structure type
-                if (sitesPlacedForContainers === previousContainerSites) {
-                    // No sites placed, move to next structure type
-                    structureIndex++;
-                } else {
-                    // Sites were placed, continue with this structure type
-                    continue;
-                }
-            } else {
-                // Structure type not applicable, move to next
-                structureIndex++;
-            }
-            
-            // Create extension construction sites
-            if (structureType === 'extensions' && 
-                room.controller.level >= 2 && room.memory.construction && 
-                room.memory.construction.extensions && 
-                room.memory.construction.extensions.planned && 
-                room.memory.construction.extensions.positions && sitesPlaced < sitesToPlace) {
-                
-                const extensionPositions = room.memory.construction.extensions.positions;
-                const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level];
-                const currentExtensions = room.memory.construction.extensions.count || 0;
-                const newExtensionPositions = [];
-                
-                // Only create extensions if we haven't reached the limit
-                if (currentExtensions < maxExtensions) {
-                    let newExtensionsCount = 0;
-                    
-                    for (let i = 0; i < extensionPositions.length && sitesPlaced < sitesToPlace; i++) {
-                        const pos = extensionPositions[i];
-                        
-                        // Check if there's already an extension or construction site here
-                        const extensionKey = `${pos.x},${pos.y},${STRUCTURE_EXTENSION}`;
-                        const hasExtension = structureMap.has(extensionKey);
-                        const hasExtensionSite = siteMap.has(extensionKey);
-                        
-                        // Create extension construction site if needed
-                        if (!hasExtension && !hasExtensionSite && currentExtensions + newExtensionsCount < maxExtensions) {
-                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
-                            if (result === OK) {
-                                sitesPlaced++;
-                                sitesPlacedForExtensions++;
-                                newExtensionsCount++;
-                                console.log(`Created extension construction site at (${pos.x},${pos.y})`);
-                                
-                                // Add to site map to prevent duplicates
-                                siteMap.set(extensionKey, true);
-                                
-                                // Update the timestamp of last non-road structure placement
-                                room.memory.construction.lastNonRoadTick = Game.time;
-                            }
-                        }
-                        
-                        // Keep this position in the plan if extension doesn't exist yet
-                        if (!hasExtension) {
-                            newExtensionPositions.push(pos);
-                        } else {
-                            room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
-                        }
-                    }
-                    
-                    // Update extension positions in memory
-                    room.memory.construction.extensions.positions = newExtensionPositions;
-                    
-                    // Check if we placed any extension sites
-                    if (sitesPlacedForExtensions === previousExtensionSites) {
-                        // No extension sites placed, move to next structure type
-                        structureIndex++;
-                    }
-                }
-            }
-            
-            // Create road construction sites
-            if (structureType === 'roads' && room.memory.construction && 
-                room.memory.construction.roads && room.memory.construction.roads.planned && 
-                room.memory.construction.roads.positions && sitesPlaced < sitesToPlace) {
-            
-            const roadPositions = room.memory.construction.roads.positions;
-            let newRoadPositions = [];
-            
-            // Only log road processing if we're in debug mode or it's a significant number
-            if (room.memory.debugConstruction || roadPositions.length > 10) {
-                console.log(`Processing ${roadPositions.length} road positions in room ${room.name}`);
-            }
-            
-            // Track how many positions we've checked
-            let positionsChecked = 0;
-            let positionsSkipped = 0;
-            let sitesPlacedForRoads = 0;
-            
-            // Process a limited number of road positions per tick to avoid getting stuck
-            // This ensures we'll move on to other structure types even if roads can't be placed
-            const MAX_ROAD_POSITIONS_TO_CHECK = 20;
-            const startIndex = room.memory.construction.roadIndex || 0;
-            const endIndex = Math.min(startIndex + MAX_ROAD_POSITIONS_TO_CHECK, roadPositions.length);
-            
-            // Keep all positions before the ones we're checking
-            if (startIndex > 0) {
-                newRoadPositions = roadPositions.slice(0, startIndex);
-            }
-            
-            for (let i = startIndex; i < endIndex && sitesPlaced < sitesToPlace; i++) {
-                positionsChecked++;
-                const pos = roadPositions[i];
-                
-                // Validate position
-                if (!pos || pos.x === undefined || pos.y === undefined) {
-                    console.log(`Invalid road position at index ${i}: ${JSON.stringify(pos)}`);
-                    continue;
-                }
-                
-                // Check if position is valid (within bounds)
-                if (pos.x < 0 || pos.x > 49 || pos.y < 0 || pos.y > 49) {
-                    console.log(`Road position out of bounds: (${pos.x},${pos.y})`);
-                    continue;
-                }
-                
-                // Check if there's already a road or construction site here
-                const roadKey = `${pos.x},${pos.y},${STRUCTURE_ROAD}`;
-                const hasRoad = structureMap.has(roadKey);
-                const hasRoadSite = siteMap.has(roadKey);
+                // Check if there's already a structure or construction site here
+                const structureKey = `${pos.x},${pos.y},${structureType}`;
+                const hasStructure = structureMap.has(structureKey);
+                const hasSite = siteMap.has(structureKey);
                 
                 // Skip if already built or under construction
-                if (hasRoad || hasRoadSite) {
-                    positionsSkipped++;
-                    // Keep this position in the plan if road doesn't exist yet
-                    if (!hasRoad) {
-                        newRoadPositions.push(pos);
-                    }
-                    continue;
-                }
+                if (hasStructure || hasSite) continue;
                 
-                // Check for any other structures or sites at this position
+                // Check for any other structures at this position
                 const lookResult = room.lookAt(pos.x, pos.y);
-                let hasStructure = false;
+                let hasOtherStructure = false;
                 
                 for (const item of lookResult) {
-                    if (item.type === LOOK_STRUCTURES || item.type === LOOK_CONSTRUCTION_SITES) {
-                        hasStructure = true;
+                    if (item.type === LOOK_STRUCTURES && 
+                        (structureType !== STRUCTURE_ROAD || item.structure.structureType !== STRUCTURE_RAMPART)) {
+                        hasOtherStructure = true;
                         break;
                     }
                 }
                 
-                if (hasStructure) {
-                    positionsSkipped++;
-                    continue;
-                }
+                if (hasOtherStructure) continue;
                 
-                // Create road construction site
-                try {
-                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
-                    if (result === OK) {
-                        sitesPlaced++;
-                        sitesPlacedForRoads++;
-                        console.log(`Created road construction site at (${pos.x},${pos.y})`);
-                        
-                        // Add to site map to prevent duplicates
-                        siteMap.set(roadKey, true);
-                    } else {
-                        console.log(`Failed to create road construction site at (${pos.x},${pos.y}), result: ${result}`);
-                        
-                        // Common error codes:
-                        // ERR_INVALID_TARGET = -7
-                        // ERR_FULL = -8 (too many construction sites)
-                        // ERR_RCL_NOT_ENOUGH = -14
-                        
-                        if (result === ERR_FULL) {
-                            console.log(`Construction site limit reached (${sitesPlaced} placed)`);
-                            break;
-                        }
-                    }
-                } catch (e) {
-                    console.log(`Exception creating road site at (${pos.x},${pos.y}): ${e}`);
-                }
-                
-                // Keep this position in the plan for next time
-                newRoadPositions.push(pos);
-            }
-            
-            // Add remaining positions that we didn't check yet
-            if (endIndex < roadPositions.length) {
-                newRoadPositions = newRoadPositions.concat(roadPositions.slice(endIndex));
-            }
-            
-            // Update the index for next time
-            if (endIndex >= roadPositions.length) {
-                // We've processed all road positions, reset the index
-                room.memory.construction.roadIndex = 0;
-            } else {
-                // Save where we left off
-                room.memory.construction.roadIndex = endIndex;
-            }
-            
-            // Only log road summary if sites were placed or we're in debug mode
-            if (sitesPlacedForRoads > 0 || room.memory.debugConstruction) {
-                console.log(`Road positions: ${positionsChecked} checked, ${positionsSkipped} skipped, ${sitesPlacedForRoads} sites placed`);
-            }
-            
-            // Update road positions in memory
-            room.memory.construction.roads.positions = newRoadPositions;
-            
-            // Check if we placed any road sites
-            if (sitesPlacedForRoads === previousRoadSites) {
-                // No road sites placed, move to next structure type
-                structureIndex++;
-            }
-        }
-        
-
-        
-            // Create tower construction sites
-            if (structureType === 'towers' && 
-                room.controller.level >= 3 && room.memory.construction && 
-                room.memory.construction.towers && 
-                room.memory.construction.towers.planned && 
-                room.memory.construction.towers.positions && sitesPlaced < sitesToPlace) {
-                
-                const towerPositions = room.memory.construction.towers.positions;
-                const maxTowers = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level];
-                const currentTowers = room.memory.construction.towers.count || 0;
-                const newTowerPositions = [];
-                
-                // Only create towers if we haven't reached the limit
-                if (currentTowers < maxTowers) {
-                    let newTowersCount = 0;
+                // Create construction site
+                const result = room.createConstructionSite(pos.x, pos.y, structureType);
+                if (result === OK) {
+                    sitesPlaced++;
+                    console.log(`Created ${structureType} construction site at (${pos.x},${pos.y})`);
                     
-                    for (let i = 0; i < towerPositions.length && sitesPlaced < sitesToPlace; i++) {
-                        const pos = towerPositions[i];
-                        
-                        // Check if there's already a tower or construction site here
-                        const towerKey = `${pos.x},${pos.y},${STRUCTURE_TOWER}`;
-                        const hasTower = structureMap.has(towerKey);
-                        const hasTowerSite = siteMap.has(towerKey);
-                        
-                        // Create tower construction site if needed
-                        if (!hasTower && !hasTowerSite && currentTowers + newTowersCount < maxTowers) {
-                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
-                            if (result === OK) {
-                                sitesPlaced++;
-                                sitesPlacedForTowers++;
-                                newTowersCount++;
-                                console.log(`Created tower construction site at (${pos.x},${pos.y})`);
-                                
-                                // Update the timestamp of last non-road structure placement
-                                room.memory.construction.lastNonRoadTick = Game.time;
-                            }
-                        }
-                        
-                        // Keep this position in the plan if tower doesn't exist yet
-                        if (!hasTower) {
-                            newTowerPositions.push(pos);
-                        } else {
-                            room.memory.construction.towers.count = (room.memory.construction.towers.count || 0) + 1;
-                        }
-                    }
-                    
-                    // Update tower positions in memory
-                    room.memory.construction.towers.positions = newTowerPositions;
-                    
-                    // Check if we placed any tower sites
-                    if (sitesPlacedForTowers === previousTowerSites) {
-                        // No tower sites placed, move to next structure type
-                        structureIndex++;
-                    }
-                }
-            }
-            
-            // Create storage construction site
-            if (structureType === 'storage' && 
-                room.controller.level >= 4 && room.memory.construction && 
-                room.memory.construction.storage && 
-                room.memory.construction.storage.planned && 
-                room.memory.construction.storage.position && 
-                sitesPlaced < sitesToPlace) {
-                
-                const pos = room.memory.construction.storage.position;
-                
-                // Check if there's already a storage or construction site here
-                const storageKey = `${pos.x},${pos.y},${STRUCTURE_STORAGE}`;
-                const hasStorage = structureMap.has(storageKey);
-                const hasStorageSite = siteMap.has(storageKey);
-                
-                // Create storage construction site if needed
-                if (!hasStorage && !hasStorageSite && !room.storage) {
-                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
-                    if (result === OK) {
-                        sitesPlaced++;
-                        sitesPlacedForStorage++;
-                        console.log(`Created storage construction site at (${pos.x},${pos.y})`);
-                        
-                        // Update the timestamp of last non-road structure placement
-                        room.memory.construction.lastNonRoadTick = Game.time;
-                    }
-                }
-                
-                // Check if we placed any storage sites
-                if (sitesPlacedForStorage === previousStorageSites) {
-                    // No storage sites placed, move to next structure type
-                    structureIndex++;
+                    // Add to site map to prevent duplicates
+                    siteMap.set(structureKey, true);
+                } else if (result !== ERR_FULL) {
+                    console.log(`Failed to create ${structureType} construction site at (${pos.x},${pos.y}), result: ${result}`);
                 }
             }
         }
@@ -1503,43 +1252,9 @@ const constructionManagerImpl = {
         room.memory.constructionSites = updatedSites.length;
         room.memory.constructionSiteIds = updatedSites.map(site => site.id);
         
-        // Update the last attempted structure type
-        if (structureOrder.length > 0) {
-            room.memory.construction.lastStructureType = structureOrder[0];
-        }
-        
-        // Calculate total non-road sites placed
-        const nonRoadSitesPlaced = sitesPlacedForContainers + sitesPlacedForExtensions + 
-                                  sitesPlacedForTowers + sitesPlacedForStorage;
-        
-        // Log if we created new sites, with more detail
+        // Log if we created new sites
         if (sitesPlaced > 0) {
-            // Count sites by type for better reporting
-            const siteTypes = {};
-            for (const site of updatedSites) {
-                siteTypes[site.structureType] = (siteTypes[site.structureType] || 0) + 1;
-            }
-            
-            // Create a summary string
-            const typeSummary = Object.entries(siteTypes)
-                .map(([type, count]) => `${count} ${type}`)
-                .join(', ');
-                
-            // Create a placement summary
-            const placementSummary = [];
-            if (sitesPlacedForContainers > 0) placementSummary.push(`${sitesPlacedForContainers} containers`);
-            if (sitesPlacedForExtensions > 0) placementSummary.push(`${sitesPlacedForExtensions} extensions`);
-            if (sitesPlacedForTowers > 0) placementSummary.push(`${sitesPlacedForTowers} towers`);
-            if (sitesPlacedForStorage > 0) placementSummary.push(`${sitesPlacedForStorage} storage`);
-            if (sitesPlacedForRoads > 0) placementSummary.push(`${sitesPlacedForRoads} roads`);
-            
-            console.log(`Room ${room.name} construction: Created ${sitesPlaced} sites (${placementSummary.join(', ')}), total now: ${updatedSites.length} (${typeSummary})`);
-        }
-        
-        // If we still don't have enough sites, run again next tick
-        if (updatedSites.length < TARGET_SITES_PER_ROOM) {
-            // Force more frequent checks until we reach our target
-            room.memory.construction.lastUpdate = Game.time - 95; // Will trigger again in 5 ticks
+            console.log(`Room ${room.name}: Created ${sitesPlaced} construction sites from room plan, total now: ${updatedSites.length}`);
         }
     }
 };
@@ -1563,7 +1278,8 @@ constructionManager.debugLastError = function() {
 const requiredMethods = [
     'run', 'updateConstructionSiteCount', 'checkRoomEvolution', 
     'planRoads', 'planContainers', 'planExtensions', 'planTowers', 'planStorage',
-    'findTowerPosition', 'findControllerContainerPosition', 'createConstructionSites'
+    'findTowerPosition', 'findControllerContainerPosition', 'createConstructionSites',
+    'generateRoomPlan', 'visualizeRoomPlan', 'createConstructionSitesFromPlan'
 ];
 
 for (const method of requiredMethods) {

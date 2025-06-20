@@ -602,6 +602,46 @@ global.forceConstruction = function(roomName) {
     return `Force created construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
 };
 
+// Generate a complete room plan
+global.generateRoomPlan = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    if (!room.controller || !room.controller.my) {
+        return `You don't control room ${roomName}`;
+    }
+    
+    const constructionManager = require('constructionManager');
+    const success = constructionManager.generateRoomPlan(room);
+    
+    if (success) {
+        // Visualize the plan
+        constructionManager.visualizeRoomPlan(room);
+        return `Generated and visualized complete room plan for ${roomName}`;
+    } else {
+        return `Failed to generate room plan for ${roomName}`;
+    }
+};
+
+// Visualize room plan
+global.visualizeRoomPlan = function(roomName, rcl = 0) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const constructionManager = require('constructionManager');
+    
+    if (!room.memory.roomPlan) {
+        return `No room plan exists for ${roomName}. Generate a plan first with global.generateRoomPlan('${roomName}')`;
+    }
+    
+    constructionManager.visualizeRoomPlan(room, rcl);
+    return `Visualizing room plan for ${roomName}${rcl > 0 ? ` at RCL ${rcl}` : ' (all RCLs)'}`;
+};
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);
