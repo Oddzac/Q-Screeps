@@ -158,6 +158,49 @@ const roomManager = {
     },
     
     /**
+     * Refresh construction site data for a room
+     * @param {Room} room - The room to refresh data for
+     */
+    refreshConstructionSites: function(room) {
+        const utils = require('utils');
+        
+        // Find and cache construction sites
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        this.cache[room.name].constructionSites = sites.length;
+        
+        // Cache construction site IDs and details for builders
+        if (sites.length > 0) {
+            this.cache[room.name].constructionSiteIds = sites.map(s => s.id);
+            
+            // Group by type for prioritization
+            const sitesByType = _.groupBy(sites, site => site.structureType);
+            this.cache[room.name].sitesByType = Object.keys(sitesByType).map(type => ({
+                type: type,
+                count: sitesByType[type].length
+            }));
+            
+            // Update room memory immediately for this critical data
+            room.memory.constructionSiteIds = sites.map(s => s.id);
+            room.memory.constructionSites = sites.length;
+            
+            // Log construction activity
+            if (Game.time % 50 === 0 || !room.memory.lastConstructionLog || 
+                Game.time - room.memory.lastConstructionLog > 100) {
+                console.log(`Room ${room.name} construction: ${sites.length} sites - ` + 
+                    this.cache[room.name].sitesByType.map(site => 
+                        `${site.count} ${site.type}`
+                    ).join(', '));
+                room.memory.lastConstructionLog = Game.time;
+            }
+        } else {
+            this.cache[room.name].constructionSiteIds = [];
+            this.cache[room.name].sitesByType = [];
+            room.memory.constructionSiteIds = [];
+            room.memory.constructionSites = 0;
+        }
+    },
+    
+    /**
      * Perform a full update of room data
      * @param {Room} room - The room to update
      */
@@ -215,42 +258,8 @@ const roomManager = {
         // Batch find operations to reduce CPU usage - use cached find
         const structures = utils.cachedFind(room, FIND_STRUCTURES, {}, 20);
         
-        // Find and cache construction sites
-        const sites = utils.cachedFind(room, FIND_CONSTRUCTION_SITES, {}, 10);
-        this.cache[room.name].constructionSites = sites.length;
-        
-        // Cache construction site IDs and details for builders
-        if (sites.length > 0) {
-            this.cache[room.name].constructionSiteIds = sites.map(s => s.id);
-            
-            // Group by type for prioritization - use cached calculation if available
-            const sitesByTypeKey = `sitesByType_${room.name}`;
-            if (!this.cache[sitesByTypeKey] || this.cache[sitesByTypeKey].time !== Game.time) {
-                const sitesByType = _.groupBy(sites, site => site.structureType);
-                this.cache[sitesByTypeKey] = {
-                    time: Game.time,
-                    value: Object.keys(sitesByType).map(type => ({
-                        type: type,
-                        count: sitesByType[type].length
-                    }))
-                };
-            }
-            
-            this.cache[room.name].sitesByType = this.cache[sitesByTypeKey].value;
-            
-            // Log construction activity
-            if (Game.time % 50 === 0 || !room.memory.lastConstructionLog || 
-                Game.time - room.memory.lastConstructionLog > 100) {
-                console.log(`Room ${room.name} construction: ${sites.length} sites - ` + 
-                    this.cache[room.name].sitesByType.map(site => 
-                        `${site.count} ${site.type}`
-                    ).join(', '));
-                room.memory.lastConstructionLog = Game.time;
-            }
-        } else {
-            this.cache[room.name].constructionSiteIds = [];
-            this.cache[room.name].sitesByType = [];
-        }
+        // Refresh construction site data
+        this.refreshConstructionSites(room);
         
         // Find structures needing repair - cache this calculation
         const repairCacheKey = `repairTargets_${room.name}`;

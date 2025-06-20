@@ -102,11 +102,16 @@ const roleBuilder = {
         let target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
         
         // Validate target is still valid for current task
-        const isValidTarget = target && (
-            (creep.memory.task === 'repairing' && target.hits < target.hitsMax) ||
-            (creep.memory.task === 'building' && target.progress < target.progressTotal) ||
-            (creep.memory.task === 'upgrading' && target.structureType === STRUCTURE_CONTROLLER)
-        );
+        let isValidTarget = false;
+        if (target) {
+            if (creep.memory.task === 'repairing' && target.hits !== undefined && target.hitsMax !== undefined) {
+                isValidTarget = target.hits < target.hitsMax;
+            } else if (creep.memory.task === 'building' && target.progressTotal !== undefined) {
+                isValidTarget = target.progress < target.progressTotal;
+            } else if (creep.memory.task === 'upgrading' && target.structureType === STRUCTURE_CONTROLLER) {
+                isValidTarget = true;
+            }
+        }
         
         // If target is invalid, clear it and find new one
         if (!isValidTarget) {
@@ -346,15 +351,57 @@ const roleBuilder = {
         const roomManager = require('roomManager');
         const constructionSiteIds = roomManager.getRoomData(creep.room.name, 'constructionSiteIds');
         
+        // If we have cached construction site IDs, try to find a valid one
         if (constructionSiteIds && constructionSiteIds.length > 0) {
+            // Keep track of invalid IDs to report back to room manager
+            const invalidIds = [];
+            
             for (const id of constructionSiteIds) {
-                const site = Game.getObjectById(id);
-                if (site && site.progress < site.progressTotal) {
-                    return site;
+                // Skip the site if it was previously causing errors
+                if (creep.memory.errorCount && creep.memory.targetId === id) {
+                    continue;
                 }
+                
+                const site = Game.getObjectById(id);
+                if (site && site.progressTotal !== undefined && site.progress < site.progressTotal) {
+                    return site;
+                } else {
+                    // Track invalid IDs
+                    invalidIds.push(id);
+                }
+            }
+            
+            // If we found invalid IDs, try to update the room manager's cache
+            if (invalidIds.length > 0 && creep.room.memory.constructionSiteIds) {
+                // Remove invalid IDs from room memory
+                creep.room.memory.constructionSiteIds = creep.room.memory.constructionSiteIds
+                    .filter(id => !invalidIds.includes(id));
+                
+                // If we've removed all IDs, force a refresh of construction sites
+                if (creep.room.memory.constructionSiteIds.length === 0) {
+                    // Find actual construction sites in the room
+                    const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+                    if (sites.length > 0) {
+                        creep.room.memory.constructionSiteIds = sites.map(s => s.id);
+                        creep.room.memory.constructionSites = sites.length;
+                        
+                        // Return the first valid site
+                        return sites[0];
+                    }
+                }
+            }
+        } else {
+            // If no cached IDs, do a direct search
+            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            if (sites.length > 0) {
+                // Update room memory with fresh data
+                creep.room.memory.constructionSiteIds = sites.map(s => s.id);
+                creep.room.memory.constructionSites = sites.length;
+                return sites[0];
             }
         }
         
+        // If no valid construction sites found, default to controller
         return creep.room.controller;
     },
     
@@ -976,16 +1023,25 @@ const roleBuilder = {
             // If no repair targets, look for construction sites
             const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
             if (sites.length > 0) {
-                const target = this.findClosestByRange(creep, sites);
-                creep.memory.targetId = target.id;
-                creep.memory.targetPos = {
-                    x: target.pos.x,
-                    y: target.pos.y,
-                    roomName: target.pos.roomName
-                };
-                creep.say('🏗️');
-                console.log(`Repairer ${creep.name} reset to construction site: ${target.id}`);
-                return;
+                // Filter out the previous target that caused issues
+                const validSites = sites.filter(site => site.id !== creep.memory.targetId);
+                
+                // If we have other sites, use one of those
+                const sitesToUse = validSites.length > 0 ? validSites : sites;
+                const target = this.findClosestByRange(creep, sitesToUse);
+                
+                // Verify the target is valid before assigning
+                if (target && target.id) {
+                    creep.memory.targetId = target.id;
+                    creep.memory.targetPos = {
+                        x: target.pos.x,
+                        y: target.pos.y,
+                        roomName: target.pos.roomName
+                    };
+                    creep.say('🏗️');
+                    console.log(`Repairer ${creep.name} reset to construction site: ${target.id}`);
+                    return;
+                }
             }
             
             // If nothing to repair or build, just move away from controller

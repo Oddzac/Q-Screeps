@@ -370,6 +370,20 @@ global.analyzeTraffic = function(roomName) {
     return output;
 };
 
+// Global function to refresh construction sites
+global.refreshConstructionSites = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const roomManager = require('roomManager');
+    roomManager.refreshConstructionSites(room);
+    
+    const sites = room.find(FIND_CONSTRUCTION_SITES);
+    return `Refreshed construction sites in ${roomName}. Found ${sites.length} sites.`;
+};
+
 // Global function to fix stuck builders
 global.fixStuckBuilders = function(roomName) {
     const room = Game.rooms[roomName];
