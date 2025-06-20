@@ -625,7 +625,7 @@ global.generateRoomPlan = function(roomName) {
     }
 };
 
-// Visualize room plan
+// Visualize room plan with toggle functionality
 global.visualizeRoomPlan = function(roomName, rcl = 0) {
     const room = Game.rooms[roomName];
     if (!room) {
@@ -638,8 +638,20 @@ global.visualizeRoomPlan = function(roomName, rcl = 0) {
         return `No room plan exists for ${roomName}. Generate a plan first with global.generateRoomPlan('${roomName}')`;
     }
     
-    constructionManager.visualizeRoomPlan(room, rcl);
-    return `Visualizing room plan for ${roomName}${rcl > 0 ? ` at RCL ${rcl}` : ' (all RCLs)'}`;
+    // Toggle visualization state
+    if (!Memory.visualizePlans) Memory.visualizePlans = {};
+    
+    if (Memory.visualizePlans[roomName]) {
+        // Turn off visualization
+        delete Memory.visualizePlans[roomName];
+        room.visual.clear();
+        return `Room plan visualization for ${roomName} turned OFF`;
+    } else {
+        // Turn on visualization
+        Memory.visualizePlans[roomName] = { rcl: rcl, lastUpdated: Game.time };
+        constructionManager.visualizeRoomPlan(room, rcl);
+        return `Room plan visualization for ${roomName}${rcl > 0 ? ` at RCL ${rcl}` : ' (all RCLs)'} turned ON`;
+    }
 };
 
 // Global error handler
@@ -1007,6 +1019,18 @@ module.exports.loop = function() {
                     fill: `rgba(255, 0, 0, ${intensity})`,
                     opacity: 0.5
                 });
+            }
+        }
+    }
+    
+    // Maintain room plan visualizations if enabled
+    if (Memory.visualizePlans) {
+        const constructionManager = require('constructionManager');
+        for (const roomName in Memory.visualizePlans) {
+            const room = Game.rooms[roomName];
+            if (room && room.memory.roomPlan) {
+                const planConfig = Memory.visualizePlans[roomName];
+                constructionManager.visualizeRoomPlan(room, planConfig.rcl);
             }
         }
     }
