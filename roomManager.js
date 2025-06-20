@@ -844,8 +844,8 @@ const roomManager = {
         const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
         const builderCount = constructionSites > 0 ? 3 : 1; // 1 repairer + 2 builders when construction exists
         
-        // 4. Upgraders: Minimal count, only 1 needed
-        const upgraderCount = 1;
+        // 4. Upgraders: Minimal count, 1 needed at all times
+        const upgraderCount = 4 - builderCount; // Ensure at least 1 upgrader
         
         // Calculate total based on actual needs
         const calculatedTotal = harvesterCount + haulerCount + builderCount + upgraderCount;
@@ -858,21 +858,6 @@ const roomManager = {
             total: calculatedTotal
         };
         
-        // Apply manual limits if set
-        if (room.memory.creepLimits) {
-            if (room.memory.creepLimits.harvester !== undefined) {
-                result.harvester = room.memory.creepLimits.harvester;
-            }
-            if (room.memory.creepLimits.hauler !== undefined) {
-                result.hauler = room.memory.creepLimits.hauler;
-            }
-            if (room.memory.creepLimits.upgrader !== undefined) {
-                result.upgrader = room.memory.creepLimits.upgrader;
-            }
-            if (room.memory.creepLimits.builder !== undefined) {
-                result.builder = room.memory.creepLimits.builder;
-            }
-        }
         
         // Apply manual limits if set
         if (room.memory.creepLimits) {

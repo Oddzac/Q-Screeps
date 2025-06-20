@@ -368,7 +368,8 @@ global.showCreeps = function(roomName) {
     const busySpawns = spawns.filter(s => s.spawning).length;
     
     // Get next spawn intent
-    const neededRole = spawnManager.getNeededRole(room, counts);
+    const spawnPriority = spawnManager.calculateSpawnPriority(room, limits, counts);
+    const neededRole = spawnPriority.role;
     
     // Format output
     let output = `=== Room ${roomName} Overview (RCL ${room.controller.level}) ===\n`;
@@ -920,7 +921,6 @@ module.exports.loop = function() {
         
         // Clear caches periodically to prevent memory leaks
         utils.clearCache();
-        spawnManager.resetCache();
         roomManager.cleanCache();
         
         // Clean up any cache keys that were accidentally stored in Memory
