@@ -870,12 +870,25 @@ const roleBuilder = {
             // Priority 4: Active sources (last resort) - choose best by availability
             const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
             if (activeSources.length > 0) {
-                const utils = require('utils');
-                source = utils.findBestSourceByAvailability(creep.room, activeSources);
-                if (source) {
-                    creep.memory.energySourceId = source.id;
-                    creep.memory.energySourceType = 'source';
-                    return source;
+                // Filter out sources near source keepers
+                const safeSources = activeSources.filter(source => {
+                    // Check if source has been marked as near keeper in room memory
+                    if (creep.room.memory.sources && 
+                        creep.room.memory.sources[source.id] && 
+                        creep.room.memory.sources[source.id].nearKeeper === true) {
+                        return false;
+                    }
+                    return true;
+                });
+                
+                if (safeSources.length > 0) {
+                    const utils = require('utils');
+                    source = utils.findBestSourceByAvailability(creep.room, safeSources);
+                    if (source) {
+                        creep.memory.energySourceId = source.id;
+                        creep.memory.energySourceType = 'source';
+                        return source;
+                    }
                 }
             }
         } else {
