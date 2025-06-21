@@ -177,12 +177,51 @@ const roleBuilder = {
                         creep.say('🏗️');
                     }
                 } else if (target.structureType === STRUCTURE_CONTROLLER) {
-                    // Controller
+                    // Find controller container for optimal positioning
+                    const controllerContainer = this.findControllerContainer(creep);
+                    
+                    // Upgrade the controller
                     actionResult = creep.upgradeController(target);
                     
-                    // If this is a repairer helping with upgrading, indicate this
-                    if (creep.memory.isRepairer === true) {
-                        creep.say('⚡');
+                    // Reset error count on successful controller interaction
+                    if (actionResult === OK) {
+                        delete creep.memory.errorCount;
+                        
+                        // If this is a repairer helping with upgrading, indicate this
+                        if (creep.memory.isRepairer === true) {
+                            creep.say('⚡');
+                        }
+                    } else if (actionResult === ERR_NOT_IN_RANGE) {
+                        // If we have a controller container, position next to it
+                        if (controllerContainer) {
+                            // Find a position adjacent to both the container and controller if possible
+                            const targetPos = this.findOptimalUpgradePosition(creep, controllerContainer);
+                            
+                            movementManager.moveToTarget(creep, targetPos, { 
+                                reusePath: 20, // Reuse path for longer since positions are static
+                                visualizePathStyle: {stroke: '#ffffff'}
+                            });
+                        } 
+                        // Otherwise use cached controller position
+                        else if (creep.memory.targetPos) {
+                            const controllerPos = new RoomPosition(
+                                creep.memory.targetPos.x,
+                                creep.memory.targetPos.y,
+                                creep.memory.targetPos.roomName
+                            );
+                            movementManager.moveToTarget(creep, controllerPos, { 
+                                reusePath: 20,
+                                visualizePathStyle: {stroke: '#ffffff'}
+                            });
+                        } 
+                        // Fallback to moving directly to controller
+                        else {
+                            movementManager.moveToTarget(creep, creep.room.controller, { 
+                                reusePath: 20,
+                                visualizePathStyle: {stroke: '#ffffff'}
+                            });
+                        }
+                        return; // Skip the rest of the logic for this tick
                     }
                 } else {
                     // Repair target
@@ -228,14 +267,65 @@ const roleBuilder = {
                     } else if (creep.memory.task === 'upgrading') {
                         // If we're already trying to upgrade but getting errors, there's a problem
                         console.log(`Builder ${creep.name} cannot upgrade controller, resetting (error #${creep.memory.errorCount})`);
-                        // Force task to upgrading and target to controller
-                        creep.memory.task = 'upgrading';
-                        creep.memory.targetId = creep.room.controller.id;
-                        creep.memory.targetPos = {
-                            x: creep.room.controller.pos.x,
-                            y: creep.room.controller.pos.y,
-                            roomName: creep.room.controller.pos.roomName
-                        };
+                        
+                        // If we've had multiple errors with upgrading, try a different task
+                        if (creep.memory.errorCount >= 2) {
+                            // Try to find a repair or build task instead
+                            const repairTargets = creep.room.find(FIND_STRUCTURES, {
+                                filter: s => s.hits < s.hitsMax * 0.8 && 
+                                      (s.structureType === STRUCTURE_CONTAINER || 
+                                       s.structureType === STRUCTURE_SPAWN ||
+                                       s.structureType === STRUCTURE_EXTENSION ||
+                                       s.structureType === STRUCTURE_TOWER ||
+                                       s.structureType === STRUCTURE_ROAD)
+                            });
+                            
+                            if (repairTargets.length > 0) {
+                                creep.memory.task = 'repairing';
+                                delete creep.memory.targetId;
+                                delete creep.memory.targetPos;
+                                delete creep.memory.errorCount;
+                                return; // Exit to allow re-evaluation with new task
+                            }
+                            
+                            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+                            if (sites.length > 0) {
+                                creep.memory.task = 'building';
+                                delete creep.memory.targetId;
+                                delete creep.memory.targetPos;
+                                delete creep.memory.errorCount;
+                                return; // Exit to allow re-evaluation with new task
+                            }
+                        }
+                        
+                        // Try a different position near the controller
+                        const positions = creep.room.lookForAtArea(LOOK_TERRAIN, 
+                            Math.max(0, creep.room.controller.pos.y - 3),
+                            Math.max(0, creep.room.controller.pos.x - 3),
+                            Math.min(49, creep.room.controller.pos.y + 3),
+                            Math.min(49, creep.room.controller.pos.x + 3),
+                            true);
+                            
+                        const validPositions = positions.filter(pos => pos.terrain !== 'wall');
+                        
+                        if (validPositions.length > 0) {
+                            // Pick a random valid position
+                            const randomPos = validPositions[Math.floor(Math.random() * validPositions.length)];
+                            creep.memory.targetPos = {
+                                x: randomPos.x,
+                                y: randomPos.y,
+                                roomName: creep.room.name
+                            };
+                        } else {
+                            // Force task to upgrading and target to controller
+                            creep.memory.task = 'upgrading';
+                            creep.memory.targetId = creep.room.controller.id;
+                            creep.memory.targetPos = {
+                                x: creep.room.controller.pos.x,
+                                y: creep.room.controller.pos.y,
+                                roomName: creep.room.controller.pos.roomName
+                            };
+                        }
                         return; // Exit to allow re-evaluation with new target
                     } else {
                         // Generic error handling with detailed logging
@@ -1162,6 +1252,69 @@ const roleBuilder = {
                 console.log(`Reset builder ${creep.name}, new target: ${target.id}`);
             }
         }
+    },
+    
+    /**
+     * Find the closest controller container
+     * @param {Creep} creep - The upgrader creep
+     * @returns {Structure|null} - The closest controller container or null if none found
+     */
+    findControllerContainer: function(creep) {
+        // Check if we've already cached the controller container
+        if (creep.memory.controllerContainerId) {
+            const container = Game.getObjectById(creep.memory.controllerContainerId);
+            if (container) return container;
+            delete creep.memory.controllerContainerId;
+        }
+        
+        // Use room manager to get controller containers
+        const roomManager = require('roomManager');
+        const containerTypes = roomManager.classifyContainers(creep.room);
+        
+        if (containerTypes && containerTypes.controllerContainers && containerTypes.controllerContainers.length > 0) {
+            // Find closest controller container
+            const closestContainer = creep.pos.findClosestByRange(containerTypes.controllerContainers);
+            if (closestContainer) {
+                // Cache the container ID
+                creep.memory.controllerContainerId = closestContainer.id;
+                return closestContainer;
+            }
+        }
+        
+        return null;
+    },
+    
+    /**
+     * Find optimal position for upgrading (adjacent to both container and controller if possible)
+     * @param {Creep} creep - The upgrader creep
+     * @param {Structure} container - The controller container
+     * @returns {RoomPosition} - The optimal position for upgrading
+     */
+    findOptimalUpgradePosition: function(creep, container) {
+        // If we've already cached an optimal position, use it
+        if (creep.memory.optimalPos) {
+            return new RoomPosition(
+                creep.memory.optimalPos.x,
+                creep.memory.optimalPos.y,
+                creep.memory.optimalPos.roomName
+            );
+        }
+        
+        // Try to find a position adjacent to both container and controller
+        const controller = creep.room.controller;
+        
+        // Simple approach: use the container position
+        // This works because controller containers are already positioned near the controller
+        const optimalPos = container.pos;
+        
+        // Cache the position
+        creep.memory.optimalPos = {
+            x: optimalPos.x,
+            y: optimalPos.y,
+            roomName: optimalPos.roomName
+        };
+        
+        return optimalPos;
     },
     
     harvestEnergySource: function(creep, source) {
