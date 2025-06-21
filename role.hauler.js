@@ -87,6 +87,9 @@ const roleHauler = {
         const room = creep.room;
         const roomManager = require('roomManager');
         
+        // Clean up stale energy requests from dead builders
+        this.cleanupStaleRequests(room);
+        
         // Get cached energy targets from room manager
         const targets = roomManager.analyzeEnergyTargets(room);
         
@@ -119,6 +122,12 @@ const roleHauler = {
                 
                 // Skip repair requests (they don't need energy delivery)
                 if (request.task === 'repairing') {
+                    continue;
+                }
+                
+                // Skip if the request is too new (less than 5 ticks old)
+                // This prevents multiple haulers from targeting the same builder
+                if (Game.time - request.timestamp < 5 && !request.assignedHaulerId) {
                     continue;
                 }
                 
@@ -245,12 +254,16 @@ const roleHauler = {
                     // Successfully delivered energy
                     creep.say('🔋');
                     
-                    // Clear assignment if builder is now full
-                    if (builder.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                    // Clear assignment if builder is now full or has enough energy
+                    if (builder.store.getFreeCapacity(RESOURCE_ENERGY) === 0 || 
+                        builder.store[RESOURCE_ENERGY] >= builder.store.getCapacity() * 0.7) {
+                        // Builder has enough energy, remove the request entirely
                         delete creep.room.memory.energyRequests[creep.memory.assignedRequestId];
                     } else {
-                        // Just clear our assignment but leave request for others
+                        // Builder still needs more energy, just clear our assignment
                         delete creep.room.memory.energyRequests[creep.memory.assignedRequestId].assignedHaulerId;
+                        // Update the timestamp so other haulers don't immediately pick it up
+                        creep.room.memory.energyRequests[creep.memory.assignedRequestId].timestamp = Game.time;
                     }
                     
                     delete creep.memory.assignedRequestId;
@@ -487,6 +500,38 @@ const roleHauler = {
             creep.say('🔍');
         } else if (result === OK) {
             creep.say('📦');
+        }
+    },
+    
+
+    /**
+     * Clean up stale energy requests from dead builders
+     * @param {Room} room - The room to clean up requests for
+     */
+    cleanupStaleRequests: function(room) {
+        // Skip if no energy requests
+        if (!room.memory.energyRequests) return;
+        
+        const requestIds = Object.keys(room.memory.energyRequests);
+        if (requestIds.length === 0) return;
+        
+        // Check each request
+        for (const id of requestIds) {
+            // Check if the builder still exists
+            const builder = Game.getObjectById(id);
+            if (!builder) {
+                // Builder no longer exists, remove the request
+                delete room.memory.energyRequests[id];
+                continue;
+            }
+            
+            // Check if request is too old (over 100 ticks)
+            const request = room.memory.energyRequests[id];
+            if (Game.time - request.timestamp > 100) {
+                // Request is too old, remove it
+                delete room.memory.energyRequests[id];
+                continue;
+            }
         }
     },
     

@@ -959,6 +959,13 @@ const roleBuilder = {
             creep.room.memory.energyRequests = {};
         }
         
+        // Check if we already have a request and it's assigned to a hauler
+        if (creep.room.memory.energyRequests[creep.id] && 
+            creep.room.memory.energyRequests[creep.id].assignedHaulerId) {
+            // A hauler is already coming, don't update the request
+            return;
+        }
+        
         // Get target site information if available
         let targetSiteInfo = null;
         if (creep.memory.targetId) {
@@ -989,6 +996,7 @@ const roleBuilder = {
             timestamp: Game.time,
             waitStartTime: creep.memory.waitStartTime,
             targetSite: targetSiteInfo,
+            task: creep.memory.task || 'unknown',
             priority: this.calculateRequestPriority(creep)
         };
     },
