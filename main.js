@@ -875,13 +875,13 @@ module.exports.loop = function() {
     }
     
     // Run remote operations manager if CPU allows
-    if (utils.shouldExecute('low')) {
+    /*if (utils.shouldExecute('low')) {
         try {
             remoteManager.run();
         } catch (error) {
             console.log(`Error in remoteManager: ${error}`);
         }
-    }
+    }*/
     
     // Process creeps by type for better CPU batching
     const creepStart = Game.cpu.getUsed();
