@@ -120,29 +120,30 @@ const roleBuilder = {
         let actionResult;
         
         try {
-            // Construction site
-            if (target.progressTotal !== undefined) {
-                actionResult = creep.build(target);
-                creep.say('🏗️');
-            }
+            
             // Controller
-            else if (target.structureType === STRUCTURE_CONTROLLER) {
+            if (target.structureType === STRUCTURE_CONTROLLER) {
                 actionResult = creep.upgradeController(target);
                 creep.say('⚡');
-                
-                // Reset error count on success
-                if (actionResult === OK) {
-                    delete creep.memory.errorCount;
-                }
+            }
+            // Construction site
+            else if (target.progressTotal !== undefined) {
+                actionResult = creep.build(target);
+                creep.say('🏗️');
             }
             // Repair target
             else if (target.hits !== undefined && target.hitsMax !== undefined) {
                 actionResult = creep.repair(target);
                 creep.say('🔧');
             }
+             
             
+            // Reset error count on success
+            if (actionResult === OK) {
+                delete creep.memory.errorCount;
+            }
             // Handle movement
-            if (actionResult === ERR_NOT_IN_RANGE) {
+            else if (actionResult === ERR_NOT_IN_RANGE) {
                 // Special handling for controller
                 if (target.structureType === STRUCTURE_CONTROLLER) {
                     const controllerContainer = this.findControllerContainer(creep);
