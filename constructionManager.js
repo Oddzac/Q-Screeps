@@ -1279,7 +1279,7 @@ const constructionManagerImpl = {
         }
         
         // Check if we should replace a suboptimal structure
-        if (existingSites.length < TARGET_SITES_PER_ROOM && Game.time % 100 === 0) {
+        if (existingSites.length < TARGET_SITES_PER_ROOM && Game.time % 50 === 0) {
             if (this.replaceSuboptimalStructure(room)) {
                 // We replaced a structure, wait until next time to place more sites
                 return;
