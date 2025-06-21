@@ -23,12 +23,6 @@ const roleBuilder = {
             this.assignTask(creep);
         }
         
-        // Check if this builder is stuck and reset if needed
-        if (this.isStuck(creep)) {
-            this.resetStuckBuilder(creep);
-            return; // Skip the rest of the logic for this tick
-        }
-        
         // State switching with minimal operations
         if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.building = false;
@@ -94,268 +88,204 @@ const roleBuilder = {
      * @param {Creep} creep - The creep to perform task
      */
     performTask: function(creep) {
-        // Assign task if not set
-        if (!creep.memory.task) {
-            this.assignTask(creep);
-        }
-        // Get current target and validate it
-        let target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
-        
-        // Validate target is still valid for current task
-        let isValidTarget = false;
-        if (target) {
-            if (creep.memory.task === 'repairing' && target.hits !== undefined && target.hitsMax !== undefined) {
-                isValidTarget = target.hits < target.hitsMax;
-                // If repair target is fully repaired, switch to upgrading
-                if (!isValidTarget && target.hits >= target.hitsMax) {
-                    creep.memory.task = 'upgrading';
-                    console.log(`Builder ${creep.name} repair target fully repaired, switching to upgrading`);
-                    return; // Exit function to allow re-evaluation with new task
-                }
-            } else if (creep.memory.task === 'building' && target.progressTotal !== undefined) {
-                isValidTarget = target.progress < target.progressTotal;
-                // If construction site is completed, switch to upgrading
-                if (!isValidTarget && target.progress >= target.progressTotal) {
-                    creep.memory.task = 'upgrading';
-                    console.log(`Builder ${creep.name} construction site completed, switching to upgrading`);
-                    return; // Exit function to allow re-evaluation with new task
-                }
-            } else if (creep.memory.task === 'upgrading' && target.structureType === STRUCTURE_CONTROLLER) {
-                // Controllers are always valid targets for upgrading if they're ours
-                isValidTarget = target.my;
-            }
+        // Check for higher priority tasks every 10 ticks
+        if (Game.time % 10 === 0) {
+            this.checkForBetterTask(creep);
         }
         
-        // If target is invalid, clear it and find new one
-        if (!isValidTarget) {
+        // Clear target if we don't have one or if it's invalid
+        if (!this.validateTarget(creep)) {
             delete creep.memory.targetId;
             delete creep.memory.targetPos;
-            target = this.findTaskTarget(creep);
         }
         
-        // Cache the target
-        if (target) {
-            creep.memory.targetId = target.id;
-            
-            // Cache position if not already done
-            if (!creep.memory.targetPos) {
+        // Find a target if we don't have one
+        if (!creep.memory.targetId) {
+            const target = this.findTarget(creep);
+            if (target) {
+                creep.memory.targetId = target.id;
                 creep.memory.targetPos = {
                     x: target.pos.x,
                     y: target.pos.y,
                     roomName: target.pos.roomName
                 };
             }
-            
-            // Special handling for controller targets
-            if (target.structureType === STRUCTURE_CONTROLLER) {
-                // Controllers are always valid if they're ours
-                if (!target.my) {
-                    console.log(`Builder ${creep.name} targeting non-owned controller, finding new target`);
-                    delete creep.memory.targetId;
-                    delete creep.memory.targetPos;
-                    return;
+        }
+        
+        // Get the current target
+        const target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
+        if (!target) return;
+        
+        // Perform action based on target type
+        let actionResult;
+        
+        try {
+            // Construction site
+            if (target.progressTotal !== undefined) {
+                actionResult = creep.build(target);
+                creep.say('🏗️');
+            }
+            // Controller
+            else if (target.structureType === STRUCTURE_CONTROLLER) {
+                actionResult = creep.upgradeController(target);
+                creep.say('⚡');
+                
+                // Reset error count on success
+                if (actionResult === OK) {
+                    delete creep.memory.errorCount;
                 }
-            } 
-            // Validate other targets
-            else if (!target.id) {
-                console.log(`Builder ${creep.name} has invalid target, finding new target`);
-                delete creep.memory.targetId;
-                delete creep.memory.targetPos;
-                return;
+            }
+            // Repair target
+            else if (target.hits !== undefined && target.hitsMax !== undefined) {
+                actionResult = creep.repair(target);
+                creep.say('🔧');
             }
             
-            // Perform action based on target type
-            let actionResult;
-            
-            try {
-                if (target.progressTotal !== undefined) {
-                    // Construction site
-                    actionResult = creep.build(target);
-                    
-                    // If this is a repairer helping with construction, indicate this
-                    if (creep.memory.isRepairer === true) {
-                        creep.say('🏗️');
-                    }
-                } else if (target.structureType === STRUCTURE_CONTROLLER) {
-                    // Find controller container for optimal positioning
+            // Handle movement
+            if (actionResult === ERR_NOT_IN_RANGE) {
+                // Special handling for controller
+                if (target.structureType === STRUCTURE_CONTROLLER) {
                     const controllerContainer = this.findControllerContainer(creep);
-                    
-                    // Upgrade the controller
-                    actionResult = creep.upgradeController(target);
-                    
-                    // Reset error count on successful controller interaction
-                    if (actionResult === OK) {
-                        delete creep.memory.errorCount;
-                        
-                        // If this is a repairer helping with upgrading, indicate this
-                        if (creep.memory.isRepairer === true) {
-                            creep.say('⚡');
-                        }
-                    } else if (actionResult === ERR_NOT_IN_RANGE) {
-                        // If we have a controller container, position next to it
-                        if (controllerContainer) {
-                            // Find a position adjacent to both the container and controller if possible
-                            const targetPos = this.findOptimalUpgradePosition(creep, controllerContainer);
-                            
-                            movementManager.moveToTarget(creep, targetPos, { 
-                                reusePath: 20, // Reuse path for longer since positions are static
-                                visualizePathStyle: {stroke: '#ffffff'}
-                            });
-                        } 
-                        // Otherwise use cached controller position
-                        else if (creep.memory.targetPos) {
-                            const controllerPos = new RoomPosition(
-                                creep.memory.targetPos.x,
-                                creep.memory.targetPos.y,
-                                creep.memory.targetPos.roomName
-                            );
-                            movementManager.moveToTarget(creep, controllerPos, { 
-                                reusePath: 20,
-                                visualizePathStyle: {stroke: '#ffffff'}
-                            });
-                        } 
-                        // Fallback to moving directly to controller
-                        else {
-                            movementManager.moveToTarget(creep, creep.room.controller, { 
-                                reusePath: 20,
-                                visualizePathStyle: {stroke: '#ffffff'}
-                            });
-                        }
-                        return; // Skip the rest of the logic for this tick
+                    if (controllerContainer) {
+                        const targetPos = this.findOptimalUpgradePosition(creep, controllerContainer);
+                        movementManager.moveToTarget(creep, targetPos, { 
+                            reusePath: 20,
+                            visualizePathStyle: {stroke: '#ffffff'}
+                        });
+                    } else {
+                        movementManager.moveToTarget(creep, target, { 
+                            reusePath: 20,
+                            visualizePathStyle: {stroke: '#ffffff'}
+                        });
                     }
                 } else {
-                    // Repair target
-                    actionResult = creep.repair(target);
-                    
-                    // If this is a repairer doing repairs, indicate this
-                    if (creep.memory.isRepairer === true) {
-                        creep.say('🔧');
-                    }
-                }
-                
-                if (actionResult === ERR_NOT_IN_RANGE) {
-                    const targetPos = new RoomPosition(
-                        creep.memory.targetPos.x,
-                        creep.memory.targetPos.y,
-                        creep.memory.targetPos.roomName
-                    );
-                    movementManager.moveToTarget(creep, targetPos, { 
+                    // Standard movement for other targets
+                    movementManager.moveToTarget(creep, target, { 
                         reusePath: 10,
                         visualizePathStyle: {stroke: '#3333ff'}
                     });
-                } else if (actionResult === ERR_INVALID_TARGET) {
-                    // Track error count for this target
-                    creep.memory.errorCount = (creep.memory.errorCount || 0) + 1;
-                    
-                    // Determine why the target is invalid and take appropriate action
-                    if (creep.memory.task === 'building') {
-                        // Construction site might be completed or removed
-                        console.log(`Builder ${creep.name} has invalid construction target, switching to upgrading`);
-                        creep.memory.task = 'upgrading';
-                        delete creep.memory.targetId;
-                        delete creep.memory.targetPos;
-                        delete creep.memory.errorCount;
-                        return; // Exit to allow re-evaluation with new task
-                    } else if (creep.memory.task === 'repairing') {
-                        // Repair target might be fully repaired or removed
-                        console.log(`Builder ${creep.name} has invalid repair target, switching to upgrading`);
-                        creep.memory.task = 'upgrading';
-                        delete creep.memory.targetId;
-                        delete creep.memory.targetPos;
-                        delete creep.memory.errorCount;
-                        return; // Exit to allow re-evaluation with new task
-                    } else if (creep.memory.task === 'upgrading') {
-                        // If we're already trying to upgrade but getting errors, there's a problem
-                        console.log(`Builder ${creep.name} cannot upgrade controller, resetting (error #${creep.memory.errorCount})`);
-                        
-                        // If we've had multiple errors with upgrading, try a different task
-                        if (creep.memory.errorCount >= 2) {
-                            // Try to find a repair or build task instead
-                            const repairTargets = creep.room.find(FIND_STRUCTURES, {
-                                filter: s => s.hits < s.hitsMax * 0.8 && 
-                                      (s.structureType === STRUCTURE_CONTAINER || 
-                                       s.structureType === STRUCTURE_SPAWN ||
-                                       s.structureType === STRUCTURE_EXTENSION ||
-                                       s.structureType === STRUCTURE_TOWER ||
-                                       s.structureType === STRUCTURE_ROAD)
-                            });
-                            
-                            if (repairTargets.length > 0) {
-                                creep.memory.task = 'repairing';
-                                delete creep.memory.targetId;
-                                delete creep.memory.targetPos;
-                                delete creep.memory.errorCount;
-                                return; // Exit to allow re-evaluation with new task
-                            }
-                            
-                            const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
-                            if (sites.length > 0) {
-                                creep.memory.task = 'building';
-                                delete creep.memory.targetId;
-                                delete creep.memory.targetPos;
-                                delete creep.memory.errorCount;
-                                return; // Exit to allow re-evaluation with new task
-                            }
-                        }
-                        
-                        // Try a different position near the controller
-                        const positions = creep.room.lookForAtArea(LOOK_TERRAIN, 
-                            Math.max(0, creep.room.controller.pos.y - 3),
-                            Math.max(0, creep.room.controller.pos.x - 3),
-                            Math.min(49, creep.room.controller.pos.y + 3),
-                            Math.min(49, creep.room.controller.pos.x + 3),
-                            true);
-                            
-                        const validPositions = positions.filter(pos => pos.terrain !== 'wall');
-                        
-                        if (validPositions.length > 0) {
-                            // Pick a random valid position
-                            const randomPos = validPositions[Math.floor(Math.random() * validPositions.length)];
-                            creep.memory.targetPos = {
-                                x: randomPos.x,
-                                y: randomPos.y,
-                                roomName: creep.room.name
-                            };
-                        } else {
-                            // Force task to upgrading and target to controller
-                            creep.memory.task = 'upgrading';
-                            creep.memory.targetId = creep.room.controller.id;
-                            creep.memory.targetPos = {
-                                x: creep.room.controller.pos.x,
-                                y: creep.room.controller.pos.y,
-                                roomName: creep.room.controller.pos.roomName
-                            };
-                        }
-                        return; // Exit to allow re-evaluation with new target
-                    } else {
-                        // Generic error handling with detailed logging
-                        let reason = 'unknown reason';
-                        if (!target) {
-                            reason = 'target no longer exists';
-                        } else if (target.structureType === STRUCTURE_CONTROLLER && !target.my) {
-                            reason = 'controller not owned';
-                        }
-                        console.log(`Builder ${creep.name} has invalid target (${target ? target.id : 'null'}), finding new target (error #${creep.memory.errorCount}): ${reason}`);
-                    }
-                    
-                    // If we've had multiple errors with this target, do a full reset
-                    if (creep.memory.errorCount >= 2) {
-                        this.resetStuckBuilder(creep);
-                    } else {
-                        // Just clear the target and let the normal logic find a new one
-                        delete creep.memory.targetId;
-                        delete creep.memory.targetPos;
-                    }
-                } else if (actionResult !== OK) {
-                    // Log errors other than distance
-                    //console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
                 }
-            } catch (e) {
-                console.log(`Builder ${creep.name} exception: ${e} when interacting with target ${target.id}`);
-                delete creep.memory.targetId;
-                delete creep.memory.targetPos;
+            }
+            // Handle errors
+            else if (actionResult === ERR_INVALID_TARGET) {
+                creep.memory.errorCount = (creep.memory.errorCount || 0) + 1;
+                console.log(`${creep.name} has invalid target (${target.id}), error #${creep.memory.errorCount}`);
+                
+                if (creep.memory.errorCount >= 2) {
+                    delete creep.memory.targetId;
+                    delete creep.memory.targetPos;
+                    delete creep.memory.errorCount;
+                }
+            }
+        } catch (e) {
+            console.log(`${creep.name} exception: ${e}`);
+            delete creep.memory.targetId;
+            delete creep.memory.targetPos;
+        }
+    },
+    
+    /**
+     * Check if current target is valid
+     * @param {Creep} creep - The creep to check
+     * @returns {boolean} - Whether the target is valid
+     */
+    validateTarget: function(creep) {
+        const target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
+        if (!target) return false;
+        
+        // Construction site
+        if (target.progressTotal !== undefined) {
+            return target.progress < target.progressTotal;
+        }
+        // Controller
+        else if (target.structureType === STRUCTURE_CONTROLLER) {
+            return target.my;
+        }
+        // Repair target
+        else if (target.hits !== undefined && target.hitsMax !== undefined) {
+            return target.hits < target.hitsMax;
+        }
+        
+        return false;
+    },
+    
+    /**
+     * Check for better tasks and switch if needed
+     * @param {Creep} creep - The creep to check
+     */
+    checkForBetterTask: function(creep) {
+        // Find repair targets
+        const repairTargets = creep.room.find(FIND_STRUCTURES, {
+            filter: s => s.hits < s.hitsMax * 0.8 && 
+                      (s.structureType === STRUCTURE_CONTAINER || 
+                       s.structureType === STRUCTURE_SPAWN ||
+                       s.structureType === STRUCTURE_EXTENSION ||
+                       s.structureType === STRUCTURE_TOWER ||
+                       s.structureType === STRUCTURE_ROAD)
+        });
+        
+        // Find construction sites
+        const constructionSites = creep.room.find(FIND_CONSTRUCTION_SITES);
+        
+        // Determine best task based on role and available targets
+        let bestTask = 'upgrading'; // Default
+        
+        if (creep.memory.isRepairer) {
+            // Repairer priority: Repair > Construction > Upgrade
+            if (repairTargets.length > 0) {
+                bestTask = 'repairing';
+            } else if (constructionSites.length > 0) {
+                bestTask = 'building';
+            }
+        } else {
+            // Builder priority: Construction > Upgrade
+            if (constructionSites.length > 0) {
+                bestTask = 'building';
             }
         }
+        
+        // Switch task if needed
+        if (bestTask !== creep.memory.task) {
+            console.log(`${creep.name} switching from ${creep.memory.task || 'none'} to ${bestTask}`);
+            creep.memory.task = bestTask;
+            delete creep.memory.targetId;
+            delete creep.memory.targetPos;
+        }
+    },
+    
+    /**
+     * Find a target based on current task
+     * @param {Creep} creep - The creep to find a target for
+     * @returns {Object} - The target
+     */
+    findTarget: function(creep) {
+        if (creep.memory.task === 'repairing') {
+            // Find repair targets
+            const repairTargets = creep.room.find(FIND_STRUCTURES, {
+                filter: s => s.hits < s.hitsMax * 0.8 && 
+                          (s.structureType === STRUCTURE_CONTAINER || 
+                           s.structureType === STRUCTURE_SPAWN ||
+                           s.structureType === STRUCTURE_EXTENSION ||
+                           s.structureType === STRUCTURE_TOWER ||
+                           s.structureType === STRUCTURE_ROAD)
+            });
+            
+            if (repairTargets.length > 0) {
+                return creep.pos.findClosestByRange(repairTargets);
+            }
+        }
+        
+        if (creep.memory.task === 'building' || (creep.memory.task === 'repairing' && !creep.memory.isRepairer)) {
+            // Find construction sites
+            const constructionSites = creep.room.find(FIND_CONSTRUCTION_SITES);
+            if (constructionSites.length > 0) {
+                return creep.pos.findClosestByRange(constructionSites);
+            }
+        }
+        
+        // Default to controller
+        creep.memory.task = 'upgrading';
+        return creep.room.controller;
     },
     
     /**
@@ -397,20 +327,7 @@ const roleBuilder = {
         }
     },
     
-    /**
-     * Check if a builder is stuck
-     * @param {Creep} creep - The creep to check
-     * @returns {boolean} - Whether the creep is stuck
-     */
-    isStuck: function(creep) {
-        // Check if has error count
-        if (creep.memory.errorCount && creep.memory.errorCount >= 2) {
-            console.log(`Builder ${creep.name} is stuck with ${creep.memory.errorCount} errors`);
-            return true;
-        }
-        
-        return false;
-    },
+
     
     /**
      * Check if a repairer should help with critical construction
@@ -1316,6 +1233,8 @@ const roleBuilder = {
         
         return optimalPos;
     },
+    
+
     
     harvestEnergySource: function(creep, source) {
         creep.memory.energySourceId = source.id;
