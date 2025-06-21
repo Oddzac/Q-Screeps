@@ -1251,7 +1251,7 @@ const constructionManagerImpl = {
         if (sites.length < TARGET_SITES_PER_ROOM && 
             (!room.memory.construction.lastUpdate || Game.time - room.memory.construction.lastUpdate >= 20)) {
             // Force a construction site creation check soon
-            room.memory.construction.lastUpdate = Game.time - 95; // Will trigger in 5 ticks
+            room.memory.construction.lastUpdate = Game.time - 45; // Will trigger in 5 ticks
         }
     },
     
