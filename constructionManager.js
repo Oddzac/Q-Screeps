@@ -1167,8 +1167,125 @@ const constructionManagerImpl = {
             return false;
         }
         
+        // Output next construction sites to console
+        const nextSites = this.getNextConstructionSites(room, 10);
+        if (nextSites.length > 0) {
+            console.log(`Next planned construction sites for ${room.name}:`);
+            for (const site of nextSites) {
+                console.log(`- ${site.type} at (${site.x},${site.y})`);
+            }
+        } else {
+            console.log(`No pending construction sites found in ${room.name}.`);
+        }
+        
         roomPlanner.visualize(room, room.memory.roomPlan, rcl);
         return true;
+    },
+    
+    /**
+     * Get the next construction sites that would be built
+     * @param {Room} room - The room to check
+     * @param {number} limit - Maximum number of sites to return
+     * @returns {Array} - Array of next construction sites
+     */
+    getNextConstructionSites: function(room, limit = 10) {
+        const nextSites = [];
+        
+        // Check containers
+        if (room.memory.construction.containers && 
+            room.memory.construction.containers.planned && 
+            room.memory.construction.containers.positions) {
+            
+            for (const pos of room.memory.construction.containers.positions) {
+                if (nextSites.length >= limit) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_CONTAINER) && 
+                    !sites.some(s => s.structureType === STRUCTURE_CONTAINER)) {
+                    nextSites.push({ type: 'container', x: pos.x, y: pos.y });
+                }
+            }
+        }
+        
+        // Check extensions
+        if (room.memory.construction.extensions && 
+            room.memory.construction.extensions.planned && 
+            room.memory.construction.extensions.positions) {
+            
+            for (const pos of room.memory.construction.extensions.positions) {
+                if (nextSites.length >= limit) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_EXTENSION) && 
+                    !sites.some(s => s.structureType === STRUCTURE_EXTENSION)) {
+                    nextSites.push({ type: 'extension', x: pos.x, y: pos.y });
+                }
+            }
+        }
+        
+        // Check towers
+        if (room.memory.construction.towers && 
+            room.memory.construction.towers.planned && 
+            room.memory.construction.towers.positions) {
+            
+            for (const pos of room.memory.construction.towers.positions) {
+                if (nextSites.length >= limit) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_TOWER) && 
+                    !sites.some(s => s.structureType === STRUCTURE_TOWER)) {
+                    nextSites.push({ type: 'tower', x: pos.x, y: pos.y });
+                }
+            }
+        }
+        
+        // Check storage
+        if (room.memory.construction.storage && 
+            room.memory.construction.storage.planned && 
+            room.memory.construction.storage.position) {
+            
+            const pos = room.memory.construction.storage.position;
+            
+            // Check if already built
+            const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+            const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+            
+            if (!structures.some(s => s.structureType === STRUCTURE_STORAGE) && 
+                !sites.some(s => s.structureType === STRUCTURE_STORAGE) && 
+                nextSites.length < limit) {
+                nextSites.push({ type: 'storage', x: pos.x, y: pos.y });
+            }
+        }
+        
+        // Check roads (limited to avoid excessive output)
+        if (room.memory.construction.roads && 
+            room.memory.construction.roads.planned && 
+            room.memory.construction.roads.positions) {
+            
+            for (const pos of room.memory.construction.roads.positions) {
+                if (nextSites.length >= limit) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_ROAD) && 
+                    !sites.some(s => s.structureType === STRUCTURE_ROAD)) {
+                    nextSites.push({ type: 'road', x: pos.x, y: pos.y });
+                }
+            }
+        }
+        
+        return nextSites;
     },
     
     /**

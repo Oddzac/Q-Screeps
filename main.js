@@ -654,6 +654,9 @@ global.visualizeRoomPlan = function(roomName, rcl = 0) {
     }
 };
 
+// Global function to check next planned construction sites
+global.checkNextConstructionSites = require('global.checkNextConstructionSites');
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);
