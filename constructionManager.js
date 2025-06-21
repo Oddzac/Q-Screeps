@@ -78,6 +78,13 @@ const constructionManagerImpl = {
             return;
         }
         
+        // If we don't have a room plan yet, generate one
+        if (force) {
+            console.log(`Forcing room plan generation for ${room.name}`);
+            this.generateRoomPlan(room);
+            return;
+        }
+        
         // Legacy planning logic for rooms without a complete plan
         // Ensure all required construction memory properties exist
         if (!room.memory.construction.roads) room.memory.construction.roads = { planned: false };
@@ -1248,10 +1255,14 @@ const constructionManagerImpl = {
         
         // Check if we need to create more sites
         const TARGET_SITES_PER_ROOM = 5;
-        if (sites.length < TARGET_SITES_PER_ROOM && 
-            (!room.memory.construction.lastUpdate || Game.time - room.memory.construction.lastUpdate >= 20)) {
-            // Force a construction site creation check soon
-            room.memory.construction.lastUpdate = Game.time - 45; // Will trigger in 5 ticks
+        if (sites.length < TARGET_SITES_PER_ROOM) {
+            // If we have a room plan and CPU is available, try to create sites immediately
+            if (room.memory.roomPlan && Game.cpu.bucket > 1000) {
+                this.createConstructionSitesFromPlan(room);
+            } else if (!room.memory.construction.lastUpdate || Game.time - room.memory.construction.lastUpdate >= 20) {
+                // Otherwise, schedule for next tick
+                room.memory.construction.lastUpdate = Game.time - 95; // Will trigger in 5 ticks
+            }
         }
     },
     
@@ -1314,6 +1325,7 @@ const constructionManagerImpl = {
         }
         
         // Define priority order for structure types
+        // Prioritize critical infrastructure first
         const structurePriority = [
             STRUCTURE_SPAWN,
             STRUCTURE_EXTENSION,
@@ -1329,6 +1341,22 @@ const constructionManagerImpl = {
             STRUCTURE_POWER_SPAWN,
             STRUCTURE_NUKER
         ];
+        
+        // Adjust priority based on RCL and existing structures
+        if (room.controller.level <= 3) {
+            // Early game: prioritize extensions and containers over roads
+            const extensionCount = _.filter(structures, s => s.structureType === STRUCTURE_EXTENSION).length;
+            const containerCount = _.filter(structures, s => s.structureType === STRUCTURE_CONTAINER).length;
+            
+            if (extensionCount < 5 || containerCount < 2) {
+                // Move roads down in priority if we need more critical structures
+                const roadIndex = structurePriority.indexOf(STRUCTURE_ROAD);
+                if (roadIndex > 0) {
+                    structurePriority.splice(roadIndex, 1);
+                    structurePriority.push(STRUCTURE_ROAD);
+                }
+            }
+        }
         
         let sitesPlaced = 0;
         
@@ -1403,7 +1431,24 @@ const constructionManagerImpl = {
         
         // Log if we created new sites
         if (sitesPlaced > 0) {
-            console.log(`Room ${room.name}: Created ${sitesPlaced} construction sites from room plan, total now: ${updatedSites.length}`);
+            // Count sites by type for better reporting
+            const siteTypes = {};
+            for (const site of updatedSites) {
+                siteTypes[site.structureType] = (siteTypes[site.structureType] || 0) + 1;
+            }
+            
+            // Create a summary string
+            const typeSummary = Object.entries(siteTypes)
+                .map(([type, count]) => `${count} ${type}`)
+                .join(', ');
+                
+            console.log(`Room ${room.name}: Created ${sitesPlaced} construction sites from room plan, total now: ${updatedSites.length} (${typeSummary})`);
+        }
+        
+        // If we still don't have enough sites, run again next tick
+        if (updatedSites.length < TARGET_SITES_PER_ROOM) {
+            // Force more frequent checks until we reach our target
+            room.memory.construction.lastUpdate = Game.time - 95; // Will trigger again in 5 ticks
         }
     },
     
