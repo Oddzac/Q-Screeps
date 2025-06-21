@@ -1270,12 +1270,20 @@ const constructionManagerImpl = {
         // Count existing construction sites in this room
         const existingSites = room.find(FIND_CONSTRUCTION_SITES);
         
-        // If we already have enough sites, no need to create more
+        // If we already have enough sites, check if we should replace suboptimal structures
         if (existingSites.length >= TARGET_SITES_PER_ROOM) {
             // Update room memory with current construction site count and IDs
             room.memory.constructionSites = existingSites.length;
             room.memory.constructionSiteIds = existingSites.map(site => site.id);
             return;
+        }
+        
+        // Check if we should replace a suboptimal structure
+        if (existingSites.length < TARGET_SITES_PER_ROOM && Game.time % 100 === 0) {
+            if (this.replaceSuboptimalStructure(room)) {
+                // We replaced a structure, wait until next time to place more sites
+                return;
+            }
         }
         
         // How many more sites we need to place to reach our target
@@ -1397,6 +1405,80 @@ const constructionManagerImpl = {
         if (sitesPlaced > 0) {
             console.log(`Room ${room.name}: Created ${sitesPlaced} construction sites from room plan, total now: ${updatedSites.length}`);
         }
+    },
+    
+    /**
+     * Replace a suboptimal structure with one that aligns with the room plan
+     * @param {Room} room - The room to check
+     * @returns {boolean} - True if a structure was replaced
+     */
+    replaceSuboptimalStructure: function(room) {
+        // Skip if we don't have a room plan
+        if (!room.memory.roomPlan) return false;
+        
+        // Get the room plan for the current RCL
+        const plan = room.memory.roomPlan;
+        if (!plan || !plan.rcl || !plan.rcl[room.controller.level]) return false;
+        
+        const rclPlan = plan.rcl[room.controller.level];
+        
+        // Find all structures in the room
+        const structures = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType !== STRUCTURE_CONTROLLER && 
+                       s.structureType !== STRUCTURE_SPAWN && // Don't remove spawns
+                       s.structureType !== STRUCTURE_STORAGE && // Don't remove storage
+                       s.structureType !== STRUCTURE_TERMINAL // Don't remove terminal
+        });
+        
+        // Create a map of planned positions for each structure type
+        const plannedPositions = {};
+        for (const structureType in rclPlan.structures) {
+            plannedPositions[structureType] = new Set();
+            for (const pos of rclPlan.structures[structureType]) {
+                plannedPositions[structureType].add(`${pos.x},${pos.y}`);
+            }
+        }
+        
+        // Find structures that are not in the plan
+        const suboptimalStructures = [];
+        for (const structure of structures) {
+            const posKey = `${structure.pos.x},${structure.pos.y}`;
+            const structureType = structure.structureType;
+            
+            // Skip if this structure type isn't in the plan
+            if (!plannedPositions[structureType]) continue;
+            
+            // Check if this structure is in the planned position for its type
+            if (!plannedPositions[structureType].has(posKey)) {
+                suboptimalStructures.push(structure);
+            }
+        }
+        
+        // If we found suboptimal structures, remove one
+        if (suboptimalStructures.length > 0) {
+            // Prioritize removing roads first, then extensions, then containers
+            const priorityOrder = {
+                [STRUCTURE_ROAD]: 1,
+                [STRUCTURE_EXTENSION]: 2,
+                [STRUCTURE_CONTAINER]: 3,
+                [STRUCTURE_TOWER]: 4
+            };
+            
+            // Sort by priority
+            suboptimalStructures.sort((a, b) => {
+                const priorityA = priorityOrder[a.structureType] || 99;
+                const priorityB = priorityOrder[b.structureType] || 99;
+                return priorityA - priorityB;
+            });
+            
+            // Remove the first structure
+            const structureToRemove = suboptimalStructures[0];
+            structureToRemove.destroy();
+            console.log(`Removed suboptimal ${structureToRemove.structureType} at (${structureToRemove.pos.x},${structureToRemove.pos.y}) to align with room plan`);
+            return true;
+        }
+        
+        return false;
     }
 };
 
