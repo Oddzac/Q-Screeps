@@ -11,7 +11,7 @@ const roleRemoteMiner = require('role.remoteMiner');
 const roleRemoteHauler = require('role.remoteHauler');
 const roomManager = require('roomManager');
 const spawnManager = require('spawnManager');
-const constructionManager = require('constructionManager');
+const construction = require('construction'); // Updated to use consolidated construction module
 const defenseManager = require('defenseManager');
 const remoteManager = require('remoteManager');
 const movementManager = require('movementManager');
@@ -35,6 +35,16 @@ global.stats = {
 
 // Global utility functions
 global.utils = utils;
+
+// Global construction functions
+const globalConstruction = require('global.construction');
+global.checkNextConstructionSites = globalConstruction.checkNextConstructionSites;
+global.diagnosisConstruction = globalConstruction.diagnosisConstruction;
+global.analyzeRoomPlanAlignment = globalConstruction.analyzeRoomPlanAlignment;
+global.checkPlanningStatus = globalConstruction.checkPlanningStatus;
+global.forceConstruction = globalConstruction.forceConstruction;
+global.generateRoomPlan = globalConstruction.generateRoomPlan;
+global.visualizeRoomPlan = globalConstruction.visualizeRoomPlan;
 
 // Debug function to check builder status
 global.checkBuilders = function() {
@@ -78,7 +88,7 @@ global.simConstruction = function() {
             Memory.rooms[roomName].construction.containers = { planned: false };
             
             // Force run the construction manager
-            constructionManager.run(Game.rooms[roomName], true);
+            construction.run(Game.rooms[roomName], true);
         }
     }
     
@@ -111,640 +121,10 @@ global.planConstruction = function(roomName) {
     
     // Force run the construction manager
     console.log(`Forcing construction planning in room ${roomName}`);
-    constructionManager.run(room, true);
+    construction.run(room, true);
     
     return `Construction planning triggered for room ${roomName}`;
 };
-
-// Global function to set creep limits for a room
-global.setCreepLimits = function(roomName, role, limit) {
-    if (!Memory.rooms[roomName]) {
-        return `Room ${roomName} not found in memory`;
-    }
-    
-    if (!Memory.rooms[roomName].creepLimits) {
-        Memory.rooms[roomName].creepLimits = {};
-    }
-    
-    // Validate role
-    const validRoles = ['harvester', 'hauler', 'upgrader', 'builder', 'scout', 'reserver', 'remoteMiner', 'remoteHauler', 'total'];
-    if (!validRoles.includes(role)) {
-        return `Invalid role. Must be one of: ${validRoles.join(', ')}`;
-    }
-    
-    // Set the limit
-    Memory.rooms[roomName].creepLimits[role] = limit;
-    console.log(`Set ${role} limit for room ${roomName} to ${limit}`);
-    
-    return `Set ${role} limit for room ${roomName} to ${limit}`;
-};
-
-// Global function to toggle traffic visualization
-global.toggleTrafficVisualization = function() {
-    if (!Memory.visualizeTraffic) {
-        Memory.visualizeTraffic = true;
-        return "Traffic visualization enabled";
-    } else {
-        Memory.visualizeTraffic = false;
-        return "Traffic visualization disabled";
-    }
-};
-
-// Global function to check CPU recovery status
-global.checkRecovery = function() {
-    // Get detailed status from recovery manager
-    const status = recoveryManager.getStatus();
-};
-
-// Global function to manage remote operations
-global.manageRemotes = function(roomName, action, targetRoom) {
-    // Validate room
-    const room = Game.rooms[roomName];
-    if (!room || !room.controller || !room.controller.my) {
-        return `Room ${roomName} not found or not owned by you`;
-    }
-    
-    // Initialize remote ops memory if needed
-    if (!Memory.remoteOps) {
-        Memory.remoteOps = {
-            rooms: {},
-            activeRemotes: {}
-        };
-    }
-    
-    // Initialize active remotes for this room
-    if (!Memory.remoteOps.activeRemotes[roomName]) {
-        Memory.remoteOps.activeRemotes[roomName] = [];
-    }
-    
-    switch(action) {
-        case 'list':
-            // List active remote rooms
-            const activeRemotes = Memory.remoteOps.activeRemotes[roomName] || [];
-            if (activeRemotes.length === 0) {
-                return `Room ${roomName} has no active remote operations`;
-            }
-            
-            let output = `Active remote operations for ${roomName}:\n`;
-            for (const remoteName of activeRemotes) {
-                const remoteData = Memory.remoteOps.rooms[remoteName] || {};
-                output += `- ${remoteName}: ${remoteData.sources || 0} sources`;
-                if (remoteData.hostiles) output += `, HOSTILES PRESENT`;
-                if (remoteData.reservation) {
-                    output += `, reserved by ${remoteData.reservation.username} (${remoteData.reservation.ticksToEnd} ticks)`;
-                }
-                output += '\n';
-            }
-            return output;
-            
-        case 'add':
-            // Add a remote room
-            if (!targetRoom) {
-                return `Must specify a target room to add`;
-            }
-            
-            // Check if already active
-            if (Memory.remoteOps.activeRemotes[roomName].includes(targetRoom)) {
-                return `Room ${targetRoom} is already an active remote for ${roomName}`;
-            }
-            
-            // Add to active remotes
-            Memory.remoteOps.activeRemotes[roomName].push(targetRoom);
-            
-            // Initialize remote room data if needed
-            if (!Memory.remoteOps.rooms[targetRoom]) {
-                Memory.remoteOps.rooms[targetRoom] = {
-                    baseRoom: roomName,
-                    lastScout: 0,
-                    sources: 0,
-                    hostiles: false,
-                    mining: true
-                };
-            } else {
-                Memory.remoteOps.rooms[targetRoom].mining = true;
-                Memory.remoteOps.rooms[targetRoom].baseRoom = roomName;
-            }
-            
-            return `Added ${targetRoom} as remote operation for ${roomName}`;
-            
-        case 'remove':
-            // Remove a remote room
-            if (!targetRoom) {
-                return `Must specify a target room to remove`;
-            }
-            
-            // Check if active
-            const index = Memory.remoteOps.activeRemotes[roomName].indexOf(targetRoom);
-            if (index === -1) {
-                return `Room ${targetRoom} is not an active remote for ${roomName}`;
-            }
-            
-            // Remove from active remotes
-            Memory.remoteOps.activeRemotes[roomName].splice(index, 1);
-            
-            // Update remote room data
-            if (Memory.remoteOps.rooms[targetRoom]) {
-                Memory.remoteOps.rooms[targetRoom].mining = false;
-            }
-            
-            return `Removed ${targetRoom} as remote operation for ${roomName}`;
-            
-        case 'status':
-            // Show detailed status of remote operations
-            return remoteManager.getDetailedStatus(roomName);
-            
-        default:
-            return `Unknown action: ${action}. Valid actions are: list, add, remove, status`;
-    }
-};
-
-global.checkRecovery = function() {
-    // Get detailed status from recovery manager
-    const status = recoveryManager.getStatus();
-    
-    let output = status;
-    
-    // Add emergency mode info
-    if (global.emergencyMode) {
-        output += `\nEmergency Mode:\n`;
-        output += `- Level: ${global.emergencyMode.level}\n`;
-        output += `- Type: ${global.emergencyMode.isRecovery ? 'adaptive recovery' : 'normal'}\n`;
-        output += `- Duration: ${Game.time - global.emergencyMode.startTime} ticks\n`;
-        output += `- Recovery Factor: ${global.emergencyMode.recoveryFactor ? 
-                 (global.emergencyMode.recoveryFactor * 100).toFixed(0) : 'N/A'}%\n`;
-    } else {
-        output += `\nEmergency Mode: off\n`;
-    }
-    
-    // Add CPU usage info
-    const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ? 
-                      global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 0;
-    
-    output += `\nCPU Usage:\n`;
-    output += `- Current: ${Game.cpu.getUsed().toFixed(2)}\n`;
-    output += `- Average: ${(avgCpuUsage * 100).toFixed(1)}%\n`;
-    output += `- Limit: ${Game.cpu.limit}\n`;
-    
-    return output;
-};
-
-// Global function to control recovery manager
-global.setRecovery = function(action, value) {
-    const recoveryManager = require('recoveryManager');
-    
-    switch(action) {
-        case 'start':
-            recoveryManager.startRecovery(Game.cpu.bucket);
-            return `Started manual recovery at bucket ${Game.cpu.bucket}`;
-        
-        case 'stop':
-            if (recoveryManager.isRecovering) {
-                const duration = Game.time - recoveryManager.recoveryStartTime;
-                recoveryManager.isRecovering = false;
-                return `Stopped recovery after ${duration} ticks`;
-            } else {
-                return `Not in recovery mode`;
-            }
-            
-        case 'rate':
-            if (!isNaN(value)) {
-                recoveryManager.recoveryRate = Number(value);
-                return `Set recovery rate to ${value}`;
-            } else {
-                return `Current recovery rate: ${recoveryManager.recoveryRate}`;
-            }
-            
-        default:
-            return `Unknown action. Use: start, stop, or rate`;
-    }
-};
-
-// Global function to analyze traffic in a room
-global.analyzeTraffic = function(roomName) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    const creeps = room.find(FIND_MY_CREEPS);
-    const creepsByRole = _.groupBy(creeps, c => c.memory.role);
-    
-    let output = `Traffic Analysis for Room ${roomName}:\n`;
-    output += `Total creeps: ${creeps.length}\n`;
-    
-    // Count creeps by role
-    for (const role in creepsByRole) {
-        output += `${role}: ${creepsByRole[role].length}\n`;
-    }
-    
-    // Find traffic hotspots
-    const positions = {};
-    for (const creep of creeps) {
-        const key = `${creep.pos.x},${creep.pos.y}`;
-        positions[key] = (positions[key] || 0) + 1;
-    }
-    
-    // Find positions with multiple creeps
-    const hotspots = Object.entries(positions)
-        .filter(([_, count]) => count > 1)
-        .sort(([_, countA], [__, countB]) => countB - countA);
-    
-    if (hotspots.length > 0) {
-        output += `\nTraffic hotspots:\n`;
-        for (const [pos, count] of hotspots) {
-            const [x, y] = pos.split(',');
-            output += `Position (${x},${y}): ${count} creeps\n`;
-            
-            // Visualize hotspots
-            room.visual.circle(parseInt(x), parseInt(y), {
-                radius: 0.5,
-                fill: 'red',
-                opacity: 0.7
-            });
-        }
-    } else {
-        output += `\nNo traffic hotspots detected.`;
-    }
-    
-    // Enable traffic visualization
-    Memory.visualizeTraffic = true;
-    
-    return output;
-};
-
-// Global function to refresh construction sites
-global.refreshConstructionSites = function(roomName) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    const roomManager = require('roomManager');
-    roomManager.refreshConstructionSites(room);
-    
-    const sites = room.find(FIND_CONSTRUCTION_SITES);
-    return `Refreshed construction sites in ${roomName}. Found ${sites.length} sites.`;
-};
-
-// Global function to fix stuck builders
-global.fixStuckBuilders = function(roomName) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    const builders = _.filter(Game.creeps, c => 
-        c.memory.role === 'builder' && 
-        c.memory.homeRoom === roomName
-    );
-    
-    let fixed = 0;
-    const roleBuilder = require('role.builder');
-    
-    for (const builder of builders) {
-        // Check if this builder is stuck
-        if (builder.memory.targetId === room.controller.id || builder.memory.errorCount > 0) {
-            // Reset the builder using our improved function
-            roleBuilder.resetStuckBuilder(builder);
-            fixed++;
-        }
-    }
-    
-    return `Fixed ${fixed} stuck builders in room ${roomName}`;
-};
-
-// Global function to check builder/repairer status
-global.checkBuilders = function(roomName) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    const builders = _.filter(Game.creeps, c => 
-        c.memory.role === 'builder' && 
-        c.memory.homeRoom === roomName
-    );
-    
-    const repairers = builders.filter(c => c.memory.isRepairer === true);
-    const constructors = builders.filter(c => c.memory.isRepairer === false);
-    
-    let output = `Builder Status for Room ${roomName}:\n`;
-    output += `Total builders: ${builders.length}\n`;
-    output += `- Repairers: ${repairers.length}\n`;
-    output += `- Constructors: ${constructors.length}\n\n`;
-    
-    // Show repair targets
-    const repairTargets = room.find(FIND_STRUCTURES, {
-        filter: s => s.hits < s.hitsMax * 0.5 && 
-                  s.hits < 10000 && 
-                  (s.structureType === STRUCTURE_CONTAINER || 
-                   s.structureType === STRUCTURE_SPAWN ||
-                   s.structureType === STRUCTURE_EXTENSION ||
-                   s.structureType === STRUCTURE_TOWER ||
-                   s.structureType === STRUCTURE_ROAD)
-    });
-    
-    output += `Repair targets: ${repairTargets.length}\n`;
-    
-    // Show construction sites
-    const sites = room.find(FIND_CONSTRUCTION_SITES);
-    output += `Construction sites: ${sites.length}\n`;
-    
-    return output;
-};
-
-// Global function to show creep counts and limits
-global.showCreeps = function(roomName) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `Room ${roomName} not found or not visible`;
-    }
-    
-    const roomManager = require('roomManager');
-    const spawnManager = require('spawnManager');
-    
-    // Get current counts
-    const counts = roomManager.getRoomData(roomName, 'creepCounts') || {
-        harvester: 0,
-        hauler: 0,
-        upgrader: 0,
-        builder: 0,
-        total: 0
-    };
-    
-    // Get recommended limits
-    let limits;
-    const cacheKey = `roomNeeds_${roomName}`;
-    if (roomManager.cache[cacheKey] && Game.time - roomManager.cache[cacheKey].time < 20) {
-        limits = roomManager.cache[cacheKey].value;
-    } else {
-        limits = roomManager.analyzeRoomNeeds(room);
-    }
-    
-    // Get manual limits
-    const manualLimits = room.memory.creepLimits || {};
-    
-    // Room overview
-    const sources = Object.keys(room.memory.sources || {}).length;
-    const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-    const repairTargets = roomManager.getRoomData(roomName, 'repairTargets') || 0;
-    const energyRequests = Object.keys(room.memory.energyRequests || {}).length;
-    
-    // Spawn status
-    const spawns = room.find(FIND_MY_SPAWNS);
-    const busySpawns = spawns.filter(s => s.spawning).length;
-    
-    // Get next spawn intent
-    const neededRole = spawnManager.getNeededRole(room, counts);
-
-    
-    // Format output
-    let output = `=== Room ${roomName} Overview (RCL ${room.controller.level}) ===\n`;
-    output += `Energy: ${room.energyAvailable}/${room.energyCapacityAvailable} | Sources: ${sources} | Construction: ${constructionSites} | Repairs: ${repairTargets}\n`;
-    output += `Energy Requests: ${energyRequests} | Spawns: ${spawns.length - busySpawns}/${spawns.length} available\n`;
-    if (neededRole) {
-        output += `Next Spawn: ${neededRole}\n`;
-    } else if (counts.total >= limits.total) {
-        output += `Next Spawn: At capacity\n`;
-    } else {
-        output += `Next Spawn: No priority role identified\n`;
-    }
-    output += `\n`;
-    
-    // Creep counts table
-    output += `Role       | Current | Auto Limit | Manual Limit | Status\n`;
-    output += `-----------|---------|-----------|-------------|--------\n`;
-    
-    const roles = ['harvester', 'hauler', 'upgrader', 'builder'];
-    for (const role of roles) {
-        const current = counts[role];
-        const autoLimit = limits[role];
-        const manualLimit = manualLimits[role] !== undefined ? manualLimits[role] : '-';
-        
-        let status = '';
-        if (current === 0) status = 'CRITICAL';
-        else if (current < autoLimit * 0.5) status = 'LOW';
-        else if (current >= autoLimit) status = 'FULL';
-        else status = 'OK';
-        
-        const roleName = role.charAt(0).toUpperCase() + role.slice(1);
-        output += `${roleName.padEnd(10)} | ${current.toString().padEnd(7)} | ${autoLimit.toString().padEnd(9)} | ${manualLimit.toString().padEnd(11)} | ${status}\n`;
-    }
-    
-    output += `-----------|---------|-----------|-------------|--------\n`;
-    output += `Total      | ${counts.total.toString().padEnd(7)} | ${limits.total.toString().padEnd(9)} | ${(manualLimits.total !== undefined ? manualLimits.total : '-').toString().padEnd(11)} | ${counts.total >= limits.total ? 'FULL' : 'OK'}\n`;
-    
-    // Individual creep details
-    const creeps = _.filter(Game.creeps, c => c.memory.homeRoom === roomName);
-    if (creeps.length > 0) {
-        output += `\n=== Individual Creeps ===\n`;
-        const creepsByRole = _.groupBy(creeps, c => c.memory.role);
-        
-        for (const role of roles) {
-            if (creepsByRole[role]) {
-                output += `\n${role.toUpperCase()}S (${creepsByRole[role].length}):\n`;
-                for (const creep of creepsByRole[role]) {
-                    const energy = `${creep.store[RESOURCE_ENERGY]}/${creep.store.getCapacity()}`;
-                    const parts = creep.body.length;
-                    const age = Game.time - (creep.memory.spawnTime || Game.time);
-                    const ttl = creep.ticksToLive || 'N/A';
-                    
-                    let status = '';
-                    if (role === 'harvester' && creep.memory.sourceId) {
-                        status = `Source: ${creep.memory.sourceId.slice(-3)}`;
-                    } else if (role === 'hauler' && creep.memory.assignedRequestId) {
-                        status = `Assigned: ${creep.memory.assignedRequestId.slice(-3)}`;
-                    } else if (role === 'builder') {
-                        const task = creep.memory.task || 'none';
-                        const isRepairer = creep.memory.isRepairer ? ' (R)' : '';
-                        status = `${task}${isRepairer}`;
-                    } else if (role === 'upgrader') {
-                        status = creep.memory.working ? 'upgrading' : 'collecting';
-                    }
-                    
-                    output += `  ${creep.name}: ${energy} energy, ${parts} parts, TTL:${ttl}, ${status}\n`;
-                }
-            }
-        }
-    }
-    
-    return output;
-};
-
-// Force construction site creation
-global.forceConstruction = function(roomName, count = 1) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    const constructionManager = require('constructionManager');
-    
-    // Force run the construction manager with debug mode
-    console.log(`Forcing construction site creation in room ${roomName}`);
-    
-    // First check if we have any construction plans
-    if (!room.memory.construction || 
-        !room.memory.construction.roads || 
-        !room.memory.construction.roads.planned) {
-        console.log(`Room ${roomName} has no construction plans. Planning roads first...`);
-        constructionManager.planRoads(room);
-        return `Created road plans for room ${roomName}. Run this command again to create sites.`;
-    }
-    
-    // Check if we have a room plan
-    if (room.memory.roomPlan) {
-        // Force create construction sites using the room plan
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
-        console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
-        
-        // Use the new force function
-        const created = constructionManager.forceConstructionSite(room, count);
-        
-        // Count how many sites were created
-        const newSites = room.find(FIND_CONSTRUCTION_SITES);
-        return `Force created ${created} construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
-    } else {
-        // Force run the construction manager
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
-        console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
-        
-        // Force run the construction manager
-        constructionManager.run(room, true);
-        
-        // Count how many sites were created
-        const newSites = room.find(FIND_CONSTRUCTION_SITES);
-        return `Force created construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
-    }
-};
-
-// Force place a specific structure type
-global.forceStructure = function(roomName, structureType, count = 1) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    if (!room.memory.roomPlan) {
-        return `Room ${roomName} has no room plan. Generate one first with global.generateRoomPlan('${roomName}')`;
-    }
-    
-    const validTypes = {
-        'extension': STRUCTURE_EXTENSION,
-        'road': STRUCTURE_ROAD,
-        'container': STRUCTURE_CONTAINER,
-        'tower': STRUCTURE_TOWER,
-        'storage': STRUCTURE_STORAGE
-    };
-    
-    if (!validTypes[structureType]) {
-        return `Invalid structure type. Valid types: ${Object.keys(validTypes).join(', ')}`;
-    }
-    
-    const plan = room.memory.roomPlan;
-    const rclPlan = plan.rcl[room.controller.level];
-    
-    if (!rclPlan || !rclPlan.structures[validTypes[structureType]]) {
-        return `No ${structureType} positions found in the room plan for RCL ${room.controller.level}`;
-    }
-    
-    const positions = rclPlan.structures[validTypes[structureType]];
-    const sites = room.find(FIND_CONSTRUCTION_SITES);
-    let created = 0;
-    
-    // Create a map of existing structures and sites
-    const structureMap = new Map();
-    const structures = room.find(FIND_STRUCTURES);
-    for (const structure of structures) {
-        const key = `${structure.pos.x},${structure.pos.y}`;
-        structureMap.set(key, structure.structureType);
-    }
-    
-    const siteMap = new Map();
-    for (const site of sites) {
-        const key = `${site.pos.x},${site.pos.y}`;
-        siteMap.set(key, site.structureType);
-    }
-    
-    // Try to place construction sites
-    for (let i = 0; i < positions.length && created < count; i++) {
-        const pos = positions[i];
-        const key = `${pos.x},${pos.y}`;
-        
-        // Skip if there's already a structure or site here
-        if (structureMap.has(key) || siteMap.has(key)) continue;
-        
-        // Create the construction site
-        const result = room.createConstructionSite(pos.x, pos.y, validTypes[structureType]);
-        if (result === OK) {
-            created++;
-            console.log(`FORCED: Created ${structureType} construction site at (${pos.x},${pos.y})`);
-        }
-    }
-    
-    return `Force created ${created} ${structureType} construction sites in ${roomName}`;
-};
-
-// Generate a complete room plan
-global.generateRoomPlan = function(roomName) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    if (!room.controller || !room.controller.my) {
-        return `You don't control room ${roomName}`;
-    }
-    
-    const constructionManager = require('constructionManager');
-    const success = constructionManager.generateRoomPlan(room);
-    
-    if (success) {
-        // Visualize the plan
-        constructionManager.visualizeRoomPlan(room);
-        return `Generated and visualized complete room plan for ${roomName}`;
-    } else {
-        return `Failed to generate room plan for ${roomName}`;
-    }
-};
-
-// Visualize room plan with toggle functionality
-global.visualizeRoomPlan = function(roomName, rcl = 0) {
-    const room = Game.rooms[roomName];
-    if (!room) {
-        return `No visibility in room ${roomName}`;
-    }
-    
-    const constructionManager = require('constructionManager');
-    
-    if (!room.memory.roomPlan) {
-        return `No room plan exists for ${roomName}. Generate a plan first with global.generateRoomPlan('${roomName}')`;
-    }
-    
-    // Toggle visualization state
-    if (!Memory.visualizePlans) Memory.visualizePlans = {};
-    
-    if (Memory.visualizePlans[roomName]) {
-        // Turn off visualization
-        delete Memory.visualizePlans[roomName];
-        room.visual.clear();
-        return `Room plan visualization for ${roomName} turned OFF`;
-    } else {
-        // Turn on visualization
-        Memory.visualizePlans[roomName] = { rcl: rcl, lastUpdated: Game.time };
-        constructionManager.visualizeRoomPlan(room, rcl);
-        return `Room plan visualization for ${roomName}${rcl > 0 ? ` at RCL ${rcl}` : ' (all RCLs)'} turned ON`;
-    }
-};
-
-// Global function to check next planned construction sites
-global.checkNextConstructionSites = require('global.checkNextConstructionSites');
-
-// Global function to diagnose construction issues
-global.diagnosisConstruction = require('global.diagnosisConstruction');
-
-// Global function to analyze room plan alignment
-global.analyzeRoomPlanAlignment = require('global.analyzeRoomPlanAlignment');
 
 // Global function to sync structure counts with memory
 global.syncStructureCounts = function(roomName) {
@@ -753,8 +133,7 @@ global.syncStructureCounts = function(roomName) {
         return `No visibility in room ${roomName}`;
     }
     
-    const constructionManager = require('constructionManager');
-    constructionManager.syncStructureCounts(room);
+    construction.syncStructureCounts(room);
     return `Synced structure counts for room ${roomName}`;
 };
 
@@ -769,14 +148,12 @@ global.replaceMisalignedStructure = function(roomName) {
         return `No room plan exists for ${roomName}`;
     }
     
-    const constructionManager = require('constructionManager');
-    
     // First check for misaligned structures
     room.memory._forcePlanCheck = true;
-    constructionManager.checkPlanAlignment(room);
+    construction.checkPlanAlignment(room);
     
     // Then try to replace one
-    const result = constructionManager.replaceSuboptimalStructure(room);
+    const result = construction.replaceSuboptimalStructure(room);
     
     if (result) {
         return `Successfully removed a misaligned structure in ${roomName}`;  
@@ -787,9 +164,7 @@ global.replaceMisalignedStructure = function(roomName) {
 
 // Global function to clear room optimizer caches
 global.clearRoomCaches = function() {
-    const optimizer = require('roomOptimizer');
-    optimizer.init();
-    optimizer.cleanupCaches();
+    construction.optimizer.clearCaches();
     
     // Clear global caches
     global._structureCache = {};
@@ -812,29 +187,24 @@ global.forcePlanning = function(roomName) {
         return `No visibility in room ${roomName}`;
     }
     
-    const constructionManager = require('constructionManager');
-    
     // First generate a complete room plan if needed
     if (!room.memory.roomPlan) {
         console.log(`Generating complete room plan for ${roomName}`);
-        constructionManager.generateRoomPlan(room);
+        construction.generateRoomPlan(room);
     }
     
     // Then plan structures based on RCL
-    let planned = constructionManager.prioritizeEarlyGameStructures(room);
+    let planned = construction.prioritizeEarlyGameStructures(room);
     
     // Force construction site creation
     const sitesToPlace = room.controller.level <= 2 ? 10 : 5;
-    const sitesCreated = constructionManager.forceConstructionSite(room, sitesToPlace);
+    const sitesCreated = construction.forceConstructionSite(room, sitesToPlace);
     
     return `Force planned structures for ${roomName} at RCL ${room.controller.level}. Created ${sitesCreated} construction sites.`;
 };
 
 // Alias for backward compatibility
 global.forceEarlyPlanning = global.forcePlanning;
-
-// Global function to check planning status
-global.checkPlanningStatus = require('global.checkPlanningStatus');
 
 // Global error handler
 const errorHandler = function(error) {
@@ -949,9 +319,9 @@ module.exports.loop = function() {
             (currentTick + roomOffset) % 5 === 0) {
             const constructionStart = Game.cpu.getUsed();
             try {
-                constructionManager.run(room);
+                construction.run(room);
             } catch (error) {
-                console.log(`CRITICAL ERROR in constructionManager.run for room ${room.name}:`);
+                console.log(`CRITICAL ERROR in construction.run for room ${room.name}:`);
                 console.log(`Message: ${error.message || error}`);
                 console.log(`Stack: ${error.stack || 'No stack trace'}`);
                 
@@ -989,15 +359,6 @@ module.exports.loop = function() {
             global.roomCpuUsage[room.name] = { total: 0, ticks: 0 };
         }
     }
-    
-    // Run remote operations manager if CPU allows
-    /*if (utils.shouldExecute('low')) {
-        try {
-            remoteManager.run();
-        } catch (error) {
-            console.log(`Error in remoteManager: ${error}`);
-        }
-    }*/
     
     // Process creeps by type for better CPU batching
     const creepStart = Game.cpu.getUsed();
@@ -1141,12 +502,11 @@ module.exports.loop = function() {
     
     // Maintain room plan visualizations if enabled
     if (Memory.visualizePlans) {
-        const constructionManager = require('constructionManager');
         for (const roomName in Memory.visualizePlans) {
             const room = Game.rooms[roomName];
             if (room && room.memory.roomPlan) {
                 const planConfig = Memory.visualizePlans[roomName];
-                constructionManager.visualizeRoomPlan(room, planConfig.rcl);
+                construction.visualizeRoomPlan(room, planConfig.rcl);
             }
         }
     }
