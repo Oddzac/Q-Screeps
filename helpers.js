@@ -96,5 +96,47 @@ module.exports = {
         }
         
         return bestPos;
+    },
+    
+    /**
+     * Check if a position is safe from source keepers
+     * @param {RoomPosition} pos - Position to check
+     * @param {number} safeDistance - Safe distance from keepers (default: 5)
+     * @returns {boolean} - True if position is safe
+     */
+    isSafeFromKeepers: function(pos, safeDistance = 5) {
+        if (!pos || !pos.roomName) return false;
+        
+        const room = Game.rooms[pos.roomName];
+        if (!room) return true; // Assume safe if room not visible
+        
+        // Check if this is a source keeper room
+        if (!room.name.match(/^[WE][0-9]+[NS][0-9]+$/) || 
+            (Math.abs(parseInt(room.name.match(/[WE]([0-9]+)/)[1]) % 10) >= 4 && 
+             Math.abs(parseInt(room.name.match(/[NS]([0-9]+)/)[1]) % 10) >= 4)) {
+            // Not a source keeper room
+            return true;
+        }
+        
+        // Find all source keeper lairs
+        const keeperLairs = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_KEEPER_LAIR
+        });
+        
+        if (keeperLairs.length === 0) return true;
+        
+        // Check distance to each keeper lair
+        for (const lair of keeperLairs) {
+            const distance = Math.max(
+                Math.abs(lair.pos.x - pos.x),
+                Math.abs(lair.pos.y - pos.y)
+            );
+            
+            if (distance <= safeDistance) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 };
