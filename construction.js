@@ -175,6 +175,164 @@ const construction = {
     },
     
     /**
+     * Create construction sites from room plan
+     * @param {Room} room - The room to create sites in
+     * @returns {number} - Number of sites created
+     */
+    createConstructionSitesFromPlan: function(room) {
+        if (!room.memory.roomPlan) return 0;
+        
+        const plan = room.memory.roomPlan;
+        const currentRCL = room.controller.level;
+        let sitesCreated = 0;
+        const maxSites = 5; // Limit sites per tick to avoid CPU spikes
+        
+        // Get current construction sites
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        if (sites.length >= 10) return 0; // Don't create more if we already have many
+        
+        // Create roads first
+        if (plan.roads && sitesCreated < maxSites) {
+            for (const pos of plan.roads) {
+                if (sitesCreated >= maxSites) break;
+                
+                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+                if (result === OK) sitesCreated++;
+            }
+        }
+        
+        // Create extensions if RCL 2+
+        if (currentRCL >= 2 && plan.extensions && sitesCreated < maxSites) {
+            for (const pos of plan.extensions) {
+                if (sitesCreated >= maxSites) break;
+                
+                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                if (result === OK) sitesCreated++;
+            }
+        }
+        
+        // Create containers
+        if (plan.containers && sitesCreated < maxSites) {
+            for (const pos of plan.containers) {
+                if (sitesCreated >= maxSites) break;
+                
+                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
+                if (result === OK) sitesCreated++;
+            }
+        }
+        
+        // Create towers if RCL 3+
+        if (currentRCL >= 3 && plan.towers && sitesCreated < maxSites) {
+            for (const pos of plan.towers) {
+                if (sitesCreated >= maxSites) break;
+                
+                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
+                if (result === OK) sitesCreated++;
+            }
+        }
+        
+        // Create storage if RCL 4+
+        if (currentRCL >= 4 && plan.storage && sitesCreated < maxSites) {
+            const pos = plan.storage;
+            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
+            if (result === OK) sitesCreated++;
+        }
+        
+        return sitesCreated;
+    },
+    
+    /**
+     * Create construction sites from legacy plans
+     * @param {Room} room - The room to create sites in
+     */
+    createConstructionSites: function(room) {
+        // Get current construction sites
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        if (sites.length >= 10) return; // Don't create more if we already have many
+        
+        const maxSites = 5; // Limit sites per tick
+        let sitesCreated = 0;
+        
+        // Create road construction sites
+        if (room.memory.construction.roads && 
+            room.memory.construction.roads.planned && 
+            room.memory.construction.roads.positions) {
+            
+            for (const pos of room.memory.construction.roads.positions) {
+                if (sitesCreated >= maxSites) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_ROAD) && 
+                    !sites.some(s => s.structureType === STRUCTURE_ROAD)) {
+                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+                    if (result === OK) sitesCreated++;
+                }
+            }
+        }
+        
+        // Create container construction sites
+        if (sitesCreated < maxSites && 
+            room.memory.construction.containers && 
+            room.memory.construction.containers.planned && 
+            room.memory.construction.containers.positions) {
+            
+            for (const pos of room.memory.construction.containers.positions) {
+                if (sitesCreated >= maxSites) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_CONTAINER) && 
+                    !sites.some(s => s.structureType === STRUCTURE_CONTAINER)) {
+                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
+                    if (result === OK) sitesCreated++;
+                }
+            }
+        }
+        
+        // Create extension construction sites if RCL 2+
+        if (sitesCreated < maxSites && 
+            room.controller.level >= 2 && 
+            room.memory.construction.extensions && 
+            room.memory.construction.extensions.planned && 
+            room.memory.construction.extensions.positions) {
+            
+            for (const pos of room.memory.construction.extensions.positions) {
+                if (sitesCreated >= maxSites) break;
+                
+                // Check if already built
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                
+                if (!structures.some(s => s.structureType === STRUCTURE_EXTENSION) && 
+                    !sites.some(s => s.structureType === STRUCTURE_EXTENSION)) {
+                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                    if (result === OK) sitesCreated++;
+                }
+            }
+        }
+    },
+    
+    /**
+     * Force creation of construction sites
+     * @param {Room} room - The room to create sites in
+     * @param {number} count - Maximum number of sites to create
+     * @returns {number} - Number of sites created
+     */
+    forceConstructionSite: function(room, count = 5) {
+        if (room.memory.roomPlan) {
+            return this.createConstructionSitesFromPlan(room);
+        } else {
+            this.createConstructionSites(room);
+            return 1; // Return approximate value since createConstructionSites doesn't return a count
+        }
+    },
+    
+    /**
      * Update construction site count in room memory
      * @param {Room} room - The room to update
      */
@@ -263,6 +421,25 @@ const construction = {
     prioritizeEarlyGameStructures: function(room) {
         // This is a placeholder - implement based on your needs
         return false;
+    },
+    
+    /**
+     * Generate a complete room plan
+     * @param {Room} room - The room to plan
+     * @returns {boolean} - Success or failure
+     */
+    generateRoomPlan: function(room) {
+        // This is a placeholder - implement based on your needs
+        return true;
+    },
+    
+    /**
+     * Visualize the room plan
+     * @param {Room} room - The room to visualize
+     * @param {number} rcl - RCL to visualize (0 for all)
+     */
+    visualizeRoomPlan: function(room, rcl = 0) {
+        // This is a placeholder - implement based on your needs
     },
     
     /**
