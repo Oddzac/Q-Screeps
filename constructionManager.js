@@ -37,6 +37,11 @@ const constructionManagerImpl = {
         // Always update construction site count for roomManager
         this.updateConstructionSiteCount(room);
         
+        // Sync structure counts periodically
+        if (force || Game.time % 100 === 0) {
+            this.syncStructureCounts(room);
+        }
+        
         // Run more frequently in simulation rooms
         const interval = isSimulation ? 5 : // Every 5 ticks in simulation
             (global.emergencyMode ? 
@@ -64,6 +69,11 @@ const constructionManagerImpl = {
         
         // If we have a room plan, use it for construction
         if (room.memory.roomPlan) {
+            // Check plan alignment periodically
+            if (force || Game.time % 500 === 0) {
+                this.checkPlanAlignment(room);
+            }
+            
             // Create construction sites based on the room plan
             this.createConstructionSitesFromPlan(room);
             
@@ -1431,6 +1441,9 @@ const constructionManagerImpl = {
             if (room.memory.roomPlan) {
                 // Just update the RCL level
                 room.memory.construction.lastRCL = room.controller.level;
+                
+                // Sync structure counts with actual structures
+                this.syncStructureCounts(room);
                 return;
             }
             
@@ -1465,6 +1478,116 @@ const constructionManagerImpl = {
                 console.log(`Room ${room.name} has fewer roads than expected, replanning roads`);
                 room.memory.construction.roads.planned = false;
             }
+        }
+        
+        // Periodically sync structure counts with actual structures
+        if (Game.time % 100 === 0) {
+            this.syncStructureCounts(room);
+        }
+    },
+    
+    /**
+     * Sync structure counts in memory with actual structures in the room
+     * @param {Room} room - The room to sync
+     */
+    syncStructureCounts: function(room) {
+        if (!room.memory.construction) {
+            room.memory.construction = {};
+        }
+        
+        // Find all structures in the room
+        const structures = room.find(FIND_STRUCTURES);
+        const structuresByType = _.groupBy(structures, s => s.structureType);
+        
+        // Update extension count
+        const extensions = structuresByType[STRUCTURE_EXTENSION] || [];
+        if (!room.memory.construction.extensions) {
+            room.memory.construction.extensions = { planned: true, count: 0 };
+        }
+        if (room.memory.construction.extensions.count !== extensions.length) {
+            console.log(`Syncing extension count in ${room.name}: ${room.memory.construction.extensions.count} -> ${extensions.length}`);
+            room.memory.construction.extensions.count = extensions.length;
+        }
+        
+        // Update tower count
+        const towers = structuresByType[STRUCTURE_TOWER] || [];
+        if (!room.memory.construction.towers) {
+            room.memory.construction.towers = { planned: true, count: 0 };
+        }
+        if (room.memory.construction.towers.count !== towers.length) {
+            console.log(`Syncing tower count in ${room.name}: ${room.memory.construction.towers.count} -> ${towers.length}`);
+            room.memory.construction.towers.count = towers.length;
+        }
+        
+        // Check for misaligned structures if we have a room plan
+        if (room.memory.roomPlan && Game.time % 500 === 0) {
+            this.checkPlanAlignment(room);
+        }
+    },
+    
+    /**
+     * Check if structures are aligned with the room plan
+     * @param {Room} room - The room to check
+     */
+    checkPlanAlignment: function(room) {
+        if (!room.memory.roomPlan) return;
+        
+        const rcl = room.controller.level;
+        const rclPlan = room.memory.roomPlan.rcl[rcl];
+        if (!rclPlan) return;
+        
+        // Find all structures in the room
+        const structures = room.find(FIND_STRUCTURES);
+        const structuresByType = _.groupBy(structures, s => s.structureType);
+        
+        // Create position maps for planned structures
+        const plannedPositions = {};
+        for (const structureType in rclPlan.structures) {
+            plannedPositions[structureType] = new Set();
+            for (const pos of rclPlan.structures[structureType]) {
+                plannedPositions[structureType].add(`${pos.x},${pos.y}`);
+            }
+        }
+        
+        // Check for misaligned structures
+        let misalignedCount = 0;
+        const misaligned = [];
+        
+        for (const structureType in structuresByType) {
+            // Skip if this structure type isn't in the plan
+            if (!plannedPositions[structureType]) continue;
+            
+            for (const structure of structuresByType[structureType]) {
+                const posKey = `${structure.pos.x},${structure.pos.y}`;
+                if (!plannedPositions[structureType].has(posKey)) {
+                    misalignedCount++;
+                    misaligned.push({
+                        type: structureType,
+                        x: structure.pos.x,
+                        y: structure.pos.y,
+                        id: structure.id
+                    });
+                }
+            }
+        }
+        
+        // Log results
+        if (misalignedCount > 0) {
+            console.log(`Room ${room.name} has ${misalignedCount} misaligned structures`);
+            
+            // Store misaligned structures in memory for potential removal
+            if (!room.memory.construction.misaligned) {
+                room.memory.construction.misaligned = [];
+            }
+            room.memory.construction.misaligned = misaligned;
+            
+            // If we have too many misaligned structures, consider replacing one
+            if (misalignedCount > 3 && Game.time % 1000 === 0) {
+                this.replaceSuboptimalStructure(room);
+            }
+        } else if (room.memory.construction.misaligned) {
+            // Clear misaligned structures from memory
+            delete room.memory.construction.misaligned;
         }
     },
     

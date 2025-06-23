@@ -741,6 +741,21 @@ global.checkNextConstructionSites = require('global.checkNextConstructionSites')
 // Global function to diagnose construction issues
 global.diagnosisConstruction = require('global.diagnosisConstruction');
 
+// Global function to analyze room plan alignment
+global.analyzeRoomPlanAlignment = require('global.analyzeRoomPlanAlignment');
+
+// Global function to sync structure counts with memory
+global.syncStructureCounts = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const constructionManager = require('constructionManager');
+    constructionManager.syncStructureCounts(room);
+    return `Synced structure counts for room ${roomName}`;
+};
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);
