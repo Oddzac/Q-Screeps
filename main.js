@@ -756,6 +756,32 @@ global.syncStructureCounts = function(roomName) {
     return `Synced structure counts for room ${roomName}`;
 };
 
+// Global function to replace a misaligned structure
+global.replaceMisalignedStructure = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    if (!room.memory.roomPlan) {
+        return `No room plan exists for ${roomName}`;
+    }
+    
+    const constructionManager = require('constructionManager');
+    
+    // First check for misaligned structures
+    constructionManager.checkPlanAlignment(room);
+    
+    // Then try to replace one
+    const result = constructionManager.replaceSuboptimalStructure(room);
+    
+    if (result) {
+        return `Successfully removed a misaligned structure in ${roomName}`;  
+    } else {
+        return `No misaligned structures found in ${roomName}`;  
+    }
+};
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);

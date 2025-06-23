@@ -1960,35 +1960,68 @@ const constructionManagerImpl = {
         
         const rclPlan = plan.rcl[room.controller.level];
         
-        // Find all structures in the room
-        const structures = room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType !== STRUCTURE_CONTROLLER && 
-                       s.structureType !== STRUCTURE_SPAWN && // Don't remove spawns
-                       s.structureType !== STRUCTURE_STORAGE && // Don't remove storage
-                       s.structureType !== STRUCTURE_TERMINAL // Don't remove terminal
-        });
+        // Use cached misaligned structures if available
+        let suboptimalStructures = [];
         
-        // Create a map of planned positions for each structure type
-        const plannedPositions = {};
-        for (const structureType in rclPlan.structures) {
-            plannedPositions[structureType] = new Set();
-            for (const pos of rclPlan.structures[structureType]) {
-                plannedPositions[structureType].add(`${pos.x},${pos.y}`);
+        if (room.memory.construction.misaligned && room.memory.construction.misaligned.length > 0) {
+            // Get structures from the cached misaligned list
+            for (const misaligned of room.memory.construction.misaligned) {
+                const structure = Game.getObjectById(misaligned.id);
+                if (structure) {
+                    suboptimalStructures.push(structure);
+                }
+            }
+            
+            // If we found structures from the cache, use them
+            if (suboptimalStructures.length > 0) {
+                console.log(`Using ${suboptimalStructures.length} cached misaligned structures in ${room.name}`);
+            } else {
+                // If no valid structures found in cache, clear the cache
+                delete room.memory.construction.misaligned;
             }
         }
         
-        // Find structures that are not in the plan
-        const suboptimalStructures = [];
-        for (const structure of structures) {
-            const posKey = `${structure.pos.x},${structure.pos.y}`;
-            const structureType = structure.structureType;
+        // If no cached misaligned structures, find them now
+        if (suboptimalStructures.length === 0) {
+            // Find all structures in the room
+            const structures = room.find(FIND_STRUCTURES, {
+                filter: s => s.structureType !== STRUCTURE_CONTROLLER && 
+                           s.structureType !== STRUCTURE_SPAWN && // Don't remove spawns
+                           s.structureType !== STRUCTURE_STORAGE && // Don't remove storage
+                           s.structureType !== STRUCTURE_TERMINAL // Don't remove terminal
+            });
             
-            // Skip if this structure type isn't in the plan
-            if (!plannedPositions[structureType]) continue;
+            // Create a map of planned positions for each structure type
+            const plannedPositions = {};
+            for (const structureType in rclPlan.structures) {
+                plannedPositions[structureType] = new Set();
+                for (const pos of rclPlan.structures[structureType]) {
+                    plannedPositions[structureType].add(`${pos.x},${pos.y}`);
+                }
+            }
             
-            // Check if this structure is in the planned position for its type
-            if (!plannedPositions[structureType].has(posKey)) {
-                suboptimalStructures.push(structure);
+            // Find structures that are not in the plan
+            for (const structure of structures) {
+                const posKey = `${structure.pos.x},${structure.pos.y}`;
+                const structureType = structure.structureType;
+                
+                // Skip if this structure type isn't in the plan
+                if (!plannedPositions[structureType]) continue;
+                
+                // Check if this structure is in the planned position for its type
+                if (!plannedPositions[structureType].has(posKey)) {
+                    suboptimalStructures.push(structure);
+                }
+            }
+            
+            // Cache the misaligned structures for future use
+            if (suboptimalStructures.length > 0) {
+                room.memory.construction.misaligned = suboptimalStructures.map(s => ({
+                    id: s.id,
+                    type: s.structureType,
+                    x: s.pos.x,
+                    y: s.pos.y
+                }));
             }
         }
         
@@ -2011,8 +2044,27 @@ const constructionManagerImpl = {
             
             // Remove the first structure
             const structureToRemove = suboptimalStructures[0];
+            const structureType = structureToRemove.structureType;
+            const pos = structureToRemove.pos;
+            
+            // Update structure counts before removing
+            if (structureType === STRUCTURE_EXTENSION && room.memory.construction.extensions) {
+                room.memory.construction.extensions.count = Math.max(0, (room.memory.construction.extensions.count || 0) - 1);
+            } else if (structureType === STRUCTURE_TOWER && room.memory.construction.towers) {
+                room.memory.construction.towers.count = Math.max(0, (room.memory.construction.towers.count || 0) - 1);
+            }
+            
+            // Remove the structure
             structureToRemove.destroy();
-            console.log(`Removed suboptimal ${structureToRemove.structureType} at (${structureToRemove.pos.x},${structureToRemove.pos.y}) to align with room plan`);
+            console.log(`Removed suboptimal ${structureType} at (${pos.x},${pos.y}) to align with room plan`);
+            
+            // Update the misaligned structures list
+            if (room.memory.construction.misaligned) {
+                room.memory.construction.misaligned = room.memory.construction.misaligned.filter(
+                    s => s.id !== structureToRemove.id
+                );
+            }
+            
             return true;
         }
         
