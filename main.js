@@ -219,6 +219,11 @@ const errorHandler = function(error) {
     };
 };
 
+// Initialize CPU history tracking if not already done
+if (!global.cpuHistory) {
+    global.cpuHistory = Array(10).fill(0.5); // Initialize with reasonable values
+}
+
 module.exports.loop = function() {
     try {
     // Start CPU tracking
@@ -513,15 +518,17 @@ module.exports.loop = function() {
     
     // Update CPU statistics
     const totalCpuUsed = Game.cpu.getUsed() - cpuStart;
-    global.stats.cpu.total = totalCpuUsed;
+    global.stats.cpu.total += totalCpuUsed; // Changed from = to += to accumulate
     global.stats.cpu.ticks++;
     
     // Track CPU usage with memory manager
     memoryManager.trackCpuUsage();
     
-    // CPU emergency recovery mode
-    const cpuLimit = Game.cpu.limit || 20;
-    const cpuPercentage = totalCpuUsed / cpuLimit;
+    // Update CPU history for tracking
+    global.cpuHistory.push(totalCpuUsed / (Game.cpu.limit || 20));
+    if (global.cpuHistory.length > 10) {
+        global.cpuHistory.shift();
+    }
     
     // Calculate average CPU usage over last 10 ticks
     const avgCpuUsage = global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length;
