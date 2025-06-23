@@ -175,6 +175,97 @@ const construction = {
     },
     
     /**
+     * Update construction site count in room memory
+     * @param {Room} room - The room to update
+     */
+    updateConstructionSiteCount: function(room) {
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        room.memory.constructionSites = sites.length;
+        
+        // Group by type for more detailed tracking
+        const sitesByType = _.groupBy(sites, site => site.structureType);
+        
+        // Store counts by type
+        room.memory.constructionSitesByType = {};
+        for (const type in sitesByType) {
+            room.memory.constructionSitesByType[type] = sitesByType[type].length;
+        }
+    },
+    
+    /**
+     * Sync structure counts with memory
+     * @param {Room} room - The room to sync
+     */
+    syncStructureCounts: function(room) {
+        if (!room.memory.construction) {
+            room.memory.construction = {};
+        }
+        
+        // Count extensions
+        const extensions = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_EXTENSION
+        });
+        
+        if (!room.memory.construction.extensions) {
+            room.memory.construction.extensions = { planned: false, count: 0 };
+        }
+        room.memory.construction.extensions.count = extensions.length;
+        
+        // Count towers
+        const towers = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_TOWER
+        });
+        
+        if (!room.memory.construction.towers) {
+            room.memory.construction.towers = { planned: false, count: 0 };
+        }
+        room.memory.construction.towers.count = towers.length;
+        
+        // Update RCL tracking
+        room.memory.construction.lastRCL = room.controller.level;
+    },
+    
+    /**
+     * Check if room has evolved and needs plan updates
+     * @param {Room} room - The room to check
+     */
+    checkRoomEvolution: function(room) {
+        const currentRCL = room.controller.level;
+        const lastRCL = room.memory.construction.lastRCL || 0;
+        
+        // If RCL increased, update memory
+        if (currentRCL > lastRCL) {
+            console.log(`Room ${room.name} evolved from RCL ${lastRCL} to ${currentRCL}`);
+            room.memory.construction.lastRCL = currentRCL;
+            
+            // Trigger planning for new structures available at this RCL
+            if (currentRCL === 2) {
+                // Extensions become available
+                room.memory.construction.extensions = { planned: false, count: 0 };
+            } else if (currentRCL === 3) {
+                // Towers become available
+                room.memory.construction.towers = { planned: false, count: 0 };
+            } else if (currentRCL === 4) {
+                // Storage becomes available
+                room.memory.construction.storage = { planned: false };
+            } else if (currentRCL === 5) {
+                // Links become available
+                room.memory.construction.links = { planned: false, count: 0 };
+            }
+        }
+    },
+    
+    /**
+     * Prioritize early game structures based on RCL
+     * @param {Room} room - The room to check
+     * @returns {boolean} - True if something was planned
+     */
+    prioritizeEarlyGameStructures: function(room) {
+        // This is a placeholder - implement based on your needs
+        return false;
+    },
+    
+    /**
      * Plan roads for the room
      * @param {Room} room - The room to plan roads for
      */
@@ -346,11 +437,93 @@ const construction = {
         return bestPos;
     },
     
+    /**
+     * Check if a position is safe from source keepers
+     * @param {Room} room - The room to check
+     * @param {RoomPosition|Object} pos - Position to check
+     * @param {number} safeDistance - Safe distance from keeper lairs
+     * @returns {boolean} - True if position is safe
+     */
+    isSafeFromSourceKeepers: function(room, pos, safeDistance = 5) {
+        // Find all source keeper lairs in the room
+        const keeperLairs = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_KEEPER_LAIR
+        });
+        
+        // If no keeper lairs, position is safe
+        if (keeperLairs.length === 0) return true;
+        
+        // Check distance to each keeper lair
+        for (const lair of keeperLairs) {
+            const distance = Math.max(
+                Math.abs(lair.pos.x - pos.x),
+                Math.abs(lair.pos.y - pos.y)
+            );
+            
+            if (distance <= safeDistance) {
+                return false;
+            }
+        }
+        
+        return true;
+    },
+    
+    /**
+     * Find a good position for a container near the controller
+     * @param {Room} room - The room to check
+     * @returns {Object|null} - Position object or null if no valid position
+     */
+    findControllerContainerPosition: function(room) {
+        const controller = room.controller;
+        if (!controller) return null;
+        
+        const terrain = room.getTerrain();
+        let bestPos = null;
+        let bestScore = -1;
+        
+        // Check positions around controller
+        for (let dx = -2; dx <= 2; dx++) {
+            for (let dy = -2; dy <= 2; dy++) {
+                // Skip positions too close or too far
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if (dist < 1 || dist > 3) continue;
+                
+                const x = controller.pos.x + dx;
+                const y = controller.pos.y + dy;
+                
+                // Skip if out of bounds or on a wall
+                if (x <= 0 || y <= 0 || x >= 49 || y >= 49 || 
+                    terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    continue;
+                }
+                
+                // Calculate score based on adjacent walkable tiles
+                let score = 0;
+                for (let nx = -1; nx <= 1; nx++) {
+                    for (let ny = -1; ny <= 1; ny++) {
+                        const ax = x + nx;
+                        const ay = y + ny;
+                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
+                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
+                            score++;
+                        }
+                    }
+                }
+                
+                // Prefer positions with more adjacent walkable tiles
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = { x, y };
+                }
+            }
+        }
+        
+        return bestPos;
+    },
+    
     // Include the optimizer as a sub-module
     optimizer: optimizer
 };
-
-
 
 // Add missing methods for analysis
 construction.getNextConstructionSites = function(room, limit = 10) {
