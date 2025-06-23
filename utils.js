@@ -221,6 +221,12 @@ const utils = {
         const veryLowCpuUsage = global.cpuHistory && 
                               global.cpuHistory.length > 0 && 
                               global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
+                              
+        // Debug CPU usage when in emergency mode
+        if (global.emergencyMode && Game.time % 10 === 0) {
+            console.log(`DEBUG: CPU history values: ${global.cpuHistory.join(', ')}`);
+            console.log(`DEBUG: Very low CPU usage: ${veryLowCpuUsage}, Avg: ${global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length}`);
+        }
         
         // In emergency mode, only run critical operations
         if (global.emergencyMode) {
@@ -252,10 +258,18 @@ const utils = {
                 if (['critical', 'high'].includes(priority)) {
                     result = true; // Always run critical and high tasks
                 } else if (priority === 'medium') {
-                    // For medium priority, check recovery factor and bucket
-                    const minBucket = isRecovery ? Math.max(200, 800 * recoveryFactor) : 800;
-                    result = (isRecovery && recoveryFactor > 0.4 && Game.cpu.bucket > minBucket) || 
-                            (veryLowCpuUsage && Game.cpu.bucket > 400);
+                    // For medium priority, be more lenient to prevent room stalling
+                    const minBucket = isRecovery ? Math.max(200, 600 * recoveryFactor) : 600;
+                    
+                    // Allow medium priority tasks more often, especially with low CPU usage
+                    result = (isRecovery && recoveryFactor > 0.3 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 300) || 
+                            Game.cpu.bucket > 1500;
+                    
+                    // Debug medium priority decisions in emergency mode
+                    if (Game.time % 10 === 0) {
+                        console.log(`DEBUG: shouldExecute medium = ${result}, isRecovery: ${isRecovery}, recoveryFactor: ${recoveryFactor}, bucket: ${Game.cpu.bucket}, minBucket: ${minBucket}`);
+                    }
                 } else {
                     // For low priority, be more strict
                     const minBucket = isRecovery ? Math.max(500, 1500 * recoveryFactor) : 1500;

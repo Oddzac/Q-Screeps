@@ -108,19 +108,34 @@ const recoveryManager = {
         
         const currentBucket = Game.cpu.bucket;
         
-        // Base factor on current bucket level
-        let factor = Math.min(currentBucket / 10000, 0.9);
+        // Base factor on current bucket level with a more generous curve
+        // This makes the factor grow faster at lower bucket levels
+        let factor = Math.min(Math.pow(currentBucket / 10000, 0.7), 0.95);
         
         // Adjust based on recovery rate
         if (this.recoveryRate > 10) {
             // Good recovery rate, be more lenient
             factor += 0.1;
+        } else if (this.recoveryRate > 5) {
+            // Decent recovery rate
+            factor += 0.05;
         } else if (this.recoveryRate < 0) {
-            // Negative recovery rate, be more strict
-            factor *= 0.5;
+            // Negative recovery rate, be more strict but not too harsh
+            factor *= 0.7;
         }
         
-        // Ensure factor is between 0 and 1
+        // Add a small bonus for time spent in recovery to prevent stalling
+        const recoveryTime = Game.time - this.recoveryStartTime;
+        if (recoveryTime > 50) {
+            factor += Math.min(0.1, recoveryTime / 1000); // Max 0.1 bonus after 1000 ticks
+        }
+        
+        // Log recovery factor calculation periodically
+        if (Game.time % 10 === 0) {
+            console.log(`Recovery factor: ${factor.toFixed(2)}, bucket: ${currentBucket}, rate: ${this.recoveryRate.toFixed(2)}, time: ${recoveryTime}`);
+        }
+        
+        // Ensure factor is between 0.1 and 1.0
         return Math.max(0.1, Math.min(factor, 1.0));
     },
     
@@ -138,17 +153,34 @@ const recoveryManager = {
         // Always run critical operations
         if (priority === 'critical') return true;
         
+        // Check if CPU usage is very low
+        const veryLowCpuUsage = global.cpuHistory && 
+                              global.cpuHistory.length > 0 && 
+                              global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
+        
         // For other priorities, use recovery factor and bucket level
+        let result;
         switch(priority) {
             case 'high':
-                return factor > 0.3 || currentBucket > 1000;
+                result = factor > 0.3 || currentBucket > 1000 || veryLowCpuUsage;
+                break;
             case 'medium':
-                return factor > 0.5 || currentBucket > 3000;
+                // Be more lenient with medium priority to prevent room stalling
+                result = factor > 0.4 || currentBucket > 2000 || veryLowCpuUsage;
+                break;
             case 'low':
-                return factor > 0.7 || currentBucket > 5000;
+                result = factor > 0.7 || currentBucket > 5000;
+                break;
             default:
-                return factor > 0.9;
+                result = factor > 0.9;
         }
+        
+        // Log decisions for medium priority periodically
+        if (priority === 'medium' && Game.time % 10 === 0) {
+            console.log(`shouldRun ${priority} = ${result}, factor: ${factor.toFixed(2)}, bucket: ${currentBucket}, veryLowCpu: ${veryLowCpuUsage}`);
+        }
+        
+        return result;
     },
     
     /**

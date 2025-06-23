@@ -561,17 +561,22 @@ module.exports.loop = function() {
     } else if (global.emergencyMode) {
         // Use adaptive exit conditions based on recovery factor
         const exitBucketThreshold = inRecoveryPeriod ? 
-                                  Math.max(800, 2000 * recoveryFactor) : 2000;
+                                  Math.max(800, 1500 * recoveryFactor) : 1500; // Lower threshold
         const exitCpuThreshold = inRecoveryPeriod ? 
                                Math.min(0.9, 0.7 + (0.2 * recoveryFactor)) : 0.8;
         
         // Exit emergency mode faster if CPU usage is very low
         const veryLowCpuUsage = avgCpuUsage < 0.3;
         const fastExitBucketThreshold = inRecoveryPeriod ? 
-                                      Math.max(500, 800 * recoveryFactor) : 800;
+                                      Math.max(400, 600 * recoveryFactor) : 600; // Lower threshold
+        
+        // Add time-based exit condition to prevent getting stuck
+        const emergencyDuration = Game.time - global.emergencyMode.startTime;
+        const timeBasedExit = emergencyDuration > 100 && Game.cpu.bucket > 1000;
         
         if ((avgCpuUsage < exitCpuThreshold && Game.cpu.bucket > exitBucketThreshold) || 
-            (veryLowCpuUsage && Game.cpu.bucket > fastExitBucketThreshold)) {
+            (veryLowCpuUsage && Game.cpu.bucket > fastExitBucketThreshold) ||
+            timeBasedExit) {
             console.log(`✓ Exiting ${global.emergencyMode.isRecovery ? 'adaptive recovery' : 'emergency'} CPU mode after ${Game.time - global.emergencyMode.startTime} ticks`);
             console.log(`Final recovery factor: ${(recoveryFactor * 100).toFixed(0)}%, bucket: ${Game.cpu.bucket}, CPU usage: ${(avgCpuUsage*100).toFixed(1)}%`);
             global.emergencyMode = null;
