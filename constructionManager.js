@@ -68,11 +68,9 @@ const constructionManagerImpl = {
             this.checkRoomEvolution(room);
         }
         
-        // Prioritize early game structures for RCL 1-2
-        if (room.controller.level <= 2) {
-            if (this.prioritizeEarlyGameStructures(room)) {
-                return; // Exit if we planned something
-            }
+        // Prioritize structures based on RCL
+        if (this.prioritizeEarlyGameStructures(room)) {
+            return; // Exit if we planned something
         }
         
         // Check if we need to generate a complete room plan
@@ -1920,36 +1918,91 @@ const constructionManagerImpl = {
     },
     
     /**
-     * Prioritize early game structures for RCL 1-2
+     * Prioritize structures based on RCL
      * @param {Room} room - The room to check
      * @returns {boolean} - True if planning was performed
      */
     prioritizeEarlyGameStructures: function(room) {
-        // Only run for RCL 1-2
-        if (room.controller.level > 2) return false;
+        // Define structure planning order by RCL
+        const rclStructures = {
+            1: ['containers', 'roads'],
+            2: ['extensions', 'containers', 'roads'],
+            3: ['towers', 'extensions', 'containers', 'roads'],
+            4: ['storage', 'towers', 'extensions', 'containers', 'roads'],
+            5: ['links', 'towers', 'extensions', 'containers', 'roads'],
+            6: ['terminal', 'links', 'towers', 'extensions', 'containers', 'roads'],
+            7: ['labs', 'terminal', 'links', 'towers', 'extensions', 'containers', 'roads'],
+            8: ['observer', 'powerSpawn', 'nuker', 'labs', 'terminal', 'links', 'towers', 'extensions', 'containers', 'roads']
+        };
         
-        // Force immediate container placement near sources
-        if (room.controller.level >= 1 && 
-            (!room.memory.construction.containers || !room.memory.construction.containers.planned)) {
-            console.log(`[RCL ${room.controller.level}] Planning containers in ${room.name}`);
-            this.planContainers(room);
-            return true;
-        }
+        // Get structures for current RCL
+        const structuresToPlan = rclStructures[room.controller.level] || [];
         
-        // Force immediate road planning at RCL 1
-        if (room.controller.level >= 1 && 
-            (!room.memory.construction.roads || !room.memory.construction.roads.planned)) {
-            console.log(`[RCL ${room.controller.level}] Planning roads in ${room.name}`);
-            this.planRoads(room);
-            return true;
-        }
-        
-        // Force immediate extension planning at RCL 2
-        if (room.controller.level >= 2 && 
-            (!room.memory.construction.extensions || !room.memory.construction.extensions.planned)) {
-            console.log(`[RCL ${room.controller.level}] Planning extensions in ${room.name}`);
-            this.planExtensions(room);
-            return true;
+        // Check each structure type in order
+        for (const structureType of structuresToPlan) {
+            switch (structureType) {
+                case 'containers':
+                    if (!room.memory.construction.containers || !room.memory.construction.containers.planned) {
+                        console.log(`[RCL ${room.controller.level}] Planning containers in ${room.name}`);
+                        this.planContainers(room);
+                        return true;
+                    }
+                    break;
+                    
+                case 'roads':
+                    if (!room.memory.construction.roads || !room.memory.construction.roads.planned) {
+                        console.log(`[RCL ${room.controller.level}] Planning roads in ${room.name}`);
+                        this.planRoads(room);
+                        return true;
+                    }
+                    break;
+                    
+                case 'extensions':
+                    if (room.controller.level >= 2 && 
+                        (!room.memory.construction.extensions || !room.memory.construction.extensions.planned)) {
+                        console.log(`[RCL ${room.controller.level}] Planning extensions in ${room.name}`);
+                        this.planExtensions(room);
+                        return true;
+                    }
+                    break;
+                    
+                case 'towers':
+                    if (room.controller.level >= 3 && 
+                        (!room.memory.construction.towers || !room.memory.construction.towers.planned)) {
+                        console.log(`[RCL ${room.controller.level}] Planning towers in ${room.name}`);
+                        this.planTowers(room);
+                        return true;
+                    }
+                    break;
+                    
+                case 'storage':
+                    if (room.controller.level >= 4 && 
+                        (!room.memory.construction.storage || !room.memory.construction.storage.planned)) {
+                        console.log(`[RCL ${room.controller.level}] Planning storage in ${room.name}`);
+                        this.planStorage(room);
+                        return true;
+                    }
+                    break;
+                    
+                // Add other structure types as needed
+                // These would need corresponding planning functions
+                case 'links':
+                    if (room.controller.level >= 5 && 
+                        (!room.memory.construction.links || !room.memory.construction.links.planned)) {
+                        console.log(`[RCL ${room.controller.level}] Planning links in ${room.name}`);
+                        require('constructionManager.planLinks')(room);
+                        return true;
+                    }
+                    break;
+                    
+                case 'terminal':
+                case 'labs':
+                case 'observer':
+                case 'powerSpawn':
+                case 'nuker':
+                    // These would be handled by the room planner
+                    break;
+            }
         }
         
         return false;

@@ -803,8 +803,8 @@ global.clearRoomCaches = function() {
     return 'All room caches cleared';
 };
 
-// Global function to force early planning for a room
-global.forceEarlyPlanning = function(roomName) {
+// Global function to force planning for a room based on RCL
+global.forcePlanning = function(roomName) {
     const room = Game.rooms[roomName];
     if (!room) {
         return `No visibility in room ${roomName}`;
@@ -818,15 +818,21 @@ global.forceEarlyPlanning = function(roomName) {
         constructionManager.generateRoomPlan(room);
     }
     
-    // Then plan early game structures
+    // Then plan structures based on RCL
     let planned = constructionManager.prioritizeEarlyGameStructures(room);
     
     // Force construction site creation
     const sitesToPlace = room.controller.level <= 2 ? 10 : 5;
     const sitesCreated = constructionManager.forceConstructionSite(room, sitesToPlace);
     
-    return `Force planned early structures for ${roomName}. Created ${sitesCreated} construction sites.`;
+    return `Force planned structures for ${roomName} at RCL ${room.controller.level}. Created ${sitesCreated} construction sites.`;
 };
+
+// Alias for backward compatibility
+global.forceEarlyPlanning = global.forcePlanning;
+
+// Global function to check planning status
+global.checkPlanningStatus = require('global.checkPlanningStatus');
 
 // Global error handler
 const errorHandler = function(error) {
