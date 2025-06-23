@@ -12,6 +12,8 @@ const roomOptimizer = {
                 structures: {},
                 sites: {},
                 lookAt: {},
+                structureMaps: {},
+                siteMaps: {},
                 lastCleanup: Game.time
             };
         }
@@ -45,6 +47,20 @@ const roomOptimizer = {
         for (const roomName in global._roomCache.lookAt) {
             if (!Game.rooms[roomName] || Game.time - global._roomCache.lookAt[roomName].time > 200) {
                 delete global._roomCache.lookAt[roomName];
+            }
+        }
+        
+        // Clean up structure maps cache
+        for (const roomName in global._roomCache.structureMaps) {
+            if (!Game.rooms[roomName] || Game.time - global._roomCache.structureMaps[roomName].time > 100) {
+                delete global._roomCache.structureMaps[roomName];
+            }
+        }
+        
+        // Clean up site maps cache
+        for (const roomName in global._roomCache.siteMaps) {
+            if (!Game.rooms[roomName] || Game.time - global._roomCache.siteMaps[roomName].time > 50) {
+                delete global._roomCache.siteMaps[roomName];
             }
         }
     },
@@ -170,6 +186,77 @@ const roomOptimizer = {
         }
         
         return false;
+    },
+    
+    /**
+     * Create a map of existing structures for faster lookups
+     * @param {Room} room - The room to create the map for
+     * @returns {Map} - Map with keys in format "x,y,structureType"
+     */
+    createStructureMap: function(room) {
+        this.init();
+        
+        if (!global._roomCache.structureMaps[room.name] || 
+            Game.time - global._roomCache.structureMaps[room.name].time > 20) {
+            
+            // Get structures from cache or find them
+            const structures = this.getCachedObjects(room, FIND_STRUCTURES);
+            
+            // Create the map
+            const structureMap = new Map();
+            for (const structure of structures) {
+                const key = `${structure.pos.x},${structure.pos.y},${structure.structureType}`;
+                structureMap.set(key, true);
+                
+                // Also add a key without structure type for position-only checks
+                const posKey = `${structure.pos.x},${structure.pos.y}`;
+                structureMap.set(posKey, true);
+            }
+            
+            // Cache the map
+            global._roomCache.structureMaps[room.name] = {
+                time: Game.time,
+                map: structureMap
+            };
+        }
+        
+        return global._roomCache.structureMaps[room.name].map;
+    },
+    
+    /**
+     * Create a map of existing construction sites for faster lookups
+     * @param {Room} room - The room to create the map for
+     * @returns {Map} - Map with keys in format "x,y,structureType"
+     */
+    createSiteMap: function(room) {
+        this.init();
+        
+        if (!global._roomCache.siteMaps[room.name] || 
+            Game.time - global._roomCache.siteMaps[room.name].time > 10) {
+            
+            // Get sites from cache or find them
+            const siteCache = this.getCachedConstructionSites(room);
+            const sites = siteCache.sites;
+            
+            // Create the map
+            const siteMap = new Map();
+            for (const site of sites) {
+                const key = `${site.pos.x},${site.pos.y},${site.structureType}`;
+                siteMap.set(key, true);
+                
+                // Also add a key without structure type for position-only checks
+                const posKey = `${site.pos.x},${site.pos.y}`;
+                siteMap.set(posKey, true);
+            }
+            
+            // Cache the map
+            global._roomCache.siteMaps[room.name] = {
+                time: Game.time,
+                map: siteMap
+            };
+        }
+        
+        return global._roomCache.siteMaps[room.name].map;
     }
 };
 

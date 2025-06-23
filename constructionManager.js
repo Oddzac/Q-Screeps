@@ -1725,6 +1725,7 @@ const constructionManagerImpl = {
         
         // Use cached structure data
         const structuresByType = optimizer.getCachedStructuresByType(room);
+        const structures = room.find(FIND_STRUCTURES);
         
         // Create maps of existing structures and sites for faster lookups
         const structureMap = optimizer.createStructureMap(room);
