@@ -217,15 +217,15 @@ const utils = {
         // Get recovery manager if available
         const recoveryManager = require('recoveryManager');
         
-        // Check if CPU usage is very low (used in multiple places)
-        const veryLowCpuUsage = global.cpuHistory && 
-                              global.cpuHistory.length > 0 && 
-                              global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
+        // Check if CPU usage is very low or moderate (used in multiple places)
+        const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ?
+                          global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 1.0;
+        const veryLowCpuUsage = avgCpuUsage < 1.0; // More reasonable threshold
                               
         // Debug CPU usage when in emergency mode
         if (global.emergencyMode && Game.time % 10 === 0) {
             console.log(`DEBUG: CPU history values: ${global.cpuHistory.join(', ')}`);
-            console.log(`DEBUG: Very low CPU usage: ${veryLowCpuUsage}, Avg: ${global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length}`);
+            console.log(`DEBUG: Very low CPU usage: ${veryLowCpuUsage}, Avg: ${avgCpuUsage.toFixed(2)}`);
         }
         
         // In emergency mode, only run critical operations
@@ -258,23 +258,30 @@ const utils = {
                 if (['critical', 'high'].includes(priority)) {
                     result = true; // Always run critical and high tasks
                 } else if (priority === 'medium') {
-                    // For medium priority, be more lenient to prevent room stalling
-                    const minBucket = isRecovery ? Math.max(200, 600 * recoveryFactor) : 600;
+                    // For medium priority, be very lenient to prevent room stalling
+                    const minBucket = isRecovery ? Math.max(100, 400 * recoveryFactor) : 400;
                     
-                    // Allow medium priority tasks more often, especially with low CPU usage
-                    result = (isRecovery && recoveryFactor > 0.3 && Game.cpu.bucket > minBucket) || 
-                            (veryLowCpuUsage && Game.cpu.bucket > 300) || 
-                            Game.cpu.bucket > 1500;
+                    // Allow medium priority tasks in most cases to prevent room stalling
+                    result = (isRecovery && recoveryFactor > 0.2 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 200) || 
+                            Game.cpu.bucket > 1000 ||
+                            avgCpuUsage < 1.5; // Allow if CPU usage is reasonable
                     
                     // Debug medium priority decisions in emergency mode
                     if (Game.time % 10 === 0) {
-                        console.log(`DEBUG: shouldExecute medium = ${result}, isRecovery: ${isRecovery}, recoveryFactor: ${recoveryFactor}, bucket: ${Game.cpu.bucket}, minBucket: ${minBucket}`);
+                        console.log(`DEBUG: shouldExecute medium = ${result}, isRecovery: ${isRecovery}, recoveryFactor: ${recoveryFactor}, bucket: ${Game.cpu.bucket}, minBucket: ${minBucket}, avgCpu: ${avgCpuUsage.toFixed(2)}`);
                     }
                 } else {
-                    // For low priority, be more strict
-                    const minBucket = isRecovery ? Math.max(500, 1500 * recoveryFactor) : 1500;
-                    result = (isRecovery && recoveryFactor > 0.6 && Game.cpu.bucket > minBucket) || 
-                            (veryLowCpuUsage && Game.cpu.bucket > 800);
+                    // For low priority, be more lenient than before but still strict
+                    const minBucket = isRecovery ? Math.max(300, 1000 * recoveryFactor) : 1000;
+                    result = (isRecovery && recoveryFactor > 0.5 && Game.cpu.bucket > minBucket) || 
+                            (veryLowCpuUsage && Game.cpu.bucket > 500) ||
+                            Game.cpu.bucket > 3000;
+                    
+                    // Debug low priority decisions occasionally
+                    if (Game.time % 20 === 0) {
+                        console.log(`DEBUG: shouldExecute low = ${result}, bucket: ${Game.cpu.bucket}, avgCpu: ${avgCpuUsage.toFixed(2)}`);
+                    }
                 }
             }
             
@@ -303,14 +310,14 @@ const utils = {
             }
         } else if (veryLowCpuUsage) {
             // Even more lenient when CPU usage is very low
-            if (bucket < 200) result = priority === 'critical';
-            else if (bucket < 400) result = ['critical', 'high'].includes(priority);
-            else result = true; // Run everything when CPU usage is very low and bucket is above 400
+            if (bucket < 100) result = priority === 'critical';
+            else if (bucket < 300) result = ['critical', 'high'].includes(priority);
+            else result = true; // Run everything when CPU usage is very low and bucket is above 300
         } else {
-            // Standard thresholds - also made more lenient
-            if (bucket < 800) result = priority === 'critical';
-            else if (bucket < 2000) result = ['critical', 'high'].includes(priority);
-            else if (bucket < 5000) result = !['low'].includes(priority);
+            // Standard thresholds - made much more lenient
+            if (bucket < 500) result = priority === 'critical';
+            else if (bucket < 1000) result = ['critical', 'high', 'medium'].includes(priority);
+            else if (bucket < 3000) result = priority !== 'low';
             else result = true; // Full bucket, run everything
         }
         

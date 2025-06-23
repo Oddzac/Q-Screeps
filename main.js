@@ -544,7 +544,7 @@ module.exports.loop = function() {
     const bucketThreshold = inRecoveryPeriod ? 
                           Math.max(100, Math.min(800, 800 * (1 - recoveryFactor))) : 800;
     
-    if (avgCpuUsage > 0.9 || Game.cpu.bucket < bucketThreshold) {
+    if (avgCpuUsage > 2.0 || Game.cpu.bucket < bucketThreshold) {
         if (!global.emergencyMode) {
             global.emergencyMode = {
                 active: true,

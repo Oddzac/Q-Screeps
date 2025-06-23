@@ -153,31 +153,31 @@ const recoveryManager = {
         // Always run critical operations
         if (priority === 'critical') return true;
         
-        // Check if CPU usage is very low
-        const veryLowCpuUsage = global.cpuHistory && 
-                              global.cpuHistory.length > 0 && 
-                              global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length < 0.3;
+        // Check if CPU usage is reasonable
+        const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ?
+                          global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 1.0;
+        const veryLowCpuUsage = avgCpuUsage < 1.0; // More reasonable threshold
         
         // For other priorities, use recovery factor and bucket level
         let result;
         switch(priority) {
             case 'high':
-                result = factor > 0.3 || currentBucket > 1000 || veryLowCpuUsage;
+                result = factor > 0.2 || currentBucket > 800 || veryLowCpuUsage;
                 break;
             case 'medium':
-                // Be more lenient with medium priority to prevent room stalling
-                result = factor > 0.4 || currentBucket > 2000 || veryLowCpuUsage;
+                // Be very lenient with medium priority to prevent room stalling
+                result = factor > 0.3 || currentBucket > 1000 || veryLowCpuUsage || avgCpuUsage < 1.5;
                 break;
             case 'low':
-                result = factor > 0.7 || currentBucket > 5000;
+                result = factor > 0.5 || currentBucket > 3000 || (veryLowCpuUsage && currentBucket > 1500);
                 break;
             default:
-                result = factor > 0.9;
+                result = factor > 0.7;
         }
         
         // Log decisions for medium priority periodically
         if (priority === 'medium' && Game.time % 10 === 0) {
-            console.log(`shouldRun ${priority} = ${result}, factor: ${factor.toFixed(2)}, bucket: ${currentBucket}, veryLowCpu: ${veryLowCpuUsage}`);
+            console.log(`shouldRun ${priority} = ${result}, factor: ${factor.toFixed(2)}, bucket: ${currentBucket}, avgCpu: ${avgCpuUsage.toFixed(2)}, veryLowCpu: ${veryLowCpuUsage}`);
         }
         
         return result;
