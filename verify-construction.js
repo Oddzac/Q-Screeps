@@ -76,7 +76,7 @@ module.exports = function() {
             console.log(`✓ Found ${sites.count} construction sites in ${room.name}`);
             
             // Test planning status
-            const status = globalConstruction.checkPlanningStatus(room.name);
+            const status = global.checkPlanningStatus(room.name);
             console.log(`✓ Planning status check successful`);
             
             // Don't actually run the construction manager as it might create sites
