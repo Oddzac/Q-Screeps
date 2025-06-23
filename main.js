@@ -803,6 +803,31 @@ global.clearRoomCaches = function() {
     return 'All room caches cleared';
 };
 
+// Global function to force early planning for a room
+global.forceEarlyPlanning = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const constructionManager = require('constructionManager');
+    
+    // First generate a complete room plan if needed
+    if (!room.memory.roomPlan) {
+        console.log(`Generating complete room plan for ${roomName}`);
+        constructionManager.generateRoomPlan(room);
+    }
+    
+    // Then plan early game structures
+    let planned = constructionManager.prioritizeEarlyGameStructures(room);
+    
+    // Force construction site creation
+    const sitesToPlace = room.controller.level <= 2 ? 10 : 5;
+    const sitesCreated = constructionManager.forceConstructionSite(room, sitesToPlace);
+    
+    return `Force planned early structures for ${roomName}. Created ${sitesCreated} construction sites.`;
+};
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);

@@ -35,10 +35,11 @@ const constructionManagerImpl = {
             };
         }
         
-        // Run more frequently in simulation rooms, less frequently in normal rooms
+        // Run more frequently in simulation rooms and early RCL, less frequently in higher RCL rooms
         const interval = isSimulation ? 5 : // Every 5 ticks in simulation
+            (room.controller.level <= 2 ? 20 : // More frequent for early RCL
             (global.emergencyMode ? 
-                (global.emergencyMode.level === 'critical' ? 1000 : 200) : 100); // Increased intervals
+                (global.emergencyMode.level === 'critical' ? 1000 : 200) : 100));
             
         if (!force && Game.time % interval !== 0) return;
         
@@ -46,18 +47,19 @@ const constructionManagerImpl = {
         if (!room.controller || !room.controller.my) return;
         
         // Skip if CPU conditions don't allow for construction tasks
-        if (!utils.shouldExecute('low')) return;
+        // Lower CPU threshold for early RCL
+        if (!utils.shouldExecute(room.controller.level <= 2 ? 'medium' : 'low')) return;
         
         // Update construction site count only when needed
         const sitesNeedUpdate = !room.memory.constructionSites || 
-                              Game.time - (room.memory._lastSiteCount || 0) > 50;
+                              Game.time - (room.memory._lastSiteCount || 0) > (room.controller.level <= 2 ? 20 : 50);
         if (force || sitesNeedUpdate) {
             this.updateConstructionSiteCount(room);
             room.memory._lastSiteCount = Game.time;
         }
         
-        // Sync structure counts periodically (less frequently)
-        if (force || Game.time % 500 === 0) { // Increased from 200 to 500
+        // Sync structure counts periodically (more frequently at low RCL)
+        if (force || Game.time % (room.controller.level <= 2 ? 100 : 500) === 0) {
             this.syncStructureCounts(room);
         }
         
@@ -66,8 +68,16 @@ const constructionManagerImpl = {
             this.checkRoomEvolution(room);
         }
         
+        // Prioritize early game structures for RCL 1-2
+        if (room.controller.level <= 2) {
+            if (this.prioritizeEarlyGameStructures(room)) {
+                return; // Exit if we planned something
+            }
+        }
+        
         // Check if we need to generate a complete room plan
-        if (!room.memory.roomPlan && (force || Game.time % 1000 === 0)) { // Increased from 500 to 1000
+        // Generate plan immediately for new rooms or when forced
+        if (!room.memory.roomPlan && (force || Game.time % 100 === 0 || room.controller.level <= 2)) {
             console.log(`Generating complete room plan for ${room.name}`);
             this.generateRoomPlan(room);
             // Visualize the plan
@@ -1653,15 +1663,21 @@ const constructionManagerImpl = {
             };
         }
         
-        // Check if we need to create more sites, but don't do it too often
-        const TARGET_SITES_PER_ROOM = 5;
+        // Check if we need to create more sites
+        // Be more aggressive at lower RCLs
+        const isEarlyGame = room.controller.level <= 2;
+        const TARGET_SITES_PER_ROOM = isEarlyGame ? 10 : 5; // More sites for early game
+        const creationInterval = isEarlyGame ? 50 : 200; // More frequent for early game
+        const bucketThreshold = isEarlyGame ? 2000 : 4000; // Lower threshold for early game
+        const cpuThreshold = isEarlyGame ? 0.7 : 0.5; // Allow higher CPU usage for early game
+        
         if (siteCache.count < TARGET_SITES_PER_ROOM && 
-            (!room.memory._lastSiteCreation || Game.time - room.memory._lastSiteCreation > 200)) { // Increased from 100 to 200
+            (!room.memory._lastSiteCreation || Game.time - room.memory._lastSiteCreation > creationInterval)) {
             // If we have a room plan and CPU is available, try to create sites
-            if (room.memory.roomPlan && Game.cpu.bucket > 4000) { // Increased bucket threshold from 3000 to 4000
+            if (room.memory.roomPlan && Game.cpu.bucket > bucketThreshold) {
                 room.memory._lastSiteCreation = Game.time;
                 // Don't create sites if CPU is too low
-                if (Game.cpu.getUsed() < Game.cpu.limit * 0.5) {
+                if (Game.cpu.getUsed() < Game.cpu.limit * cpuThreshold) {
                     this.createConstructionSitesFromPlan(room);
                 }
             }
@@ -1718,34 +1734,75 @@ const constructionManagerImpl = {
         
         // Define priority order for structure types
         // Prioritize critical infrastructure first
-        const structurePriority = [
-            STRUCTURE_SPAWN,
-            STRUCTURE_EXTENSION,
-            STRUCTURE_CONTAINER,
-            STRUCTURE_TOWER,
-            STRUCTURE_STORAGE,
-            STRUCTURE_ROAD,
-            STRUCTURE_LINK,
-            STRUCTURE_TERMINAL,
-            STRUCTURE_LAB,
-            STRUCTURE_FACTORY,
-            STRUCTURE_OBSERVER,
-            STRUCTURE_POWER_SPAWN,
-            STRUCTURE_NUKER
-        ];
+        let structurePriority;
         
-        // Adjust priority based on RCL and existing structures
+        // Different priorities based on RCL
+        if (room.controller.level <= 2) {
+            // RCL 1-2: Focus on containers, extensions, then roads
+            structurePriority = [
+                STRUCTURE_SPAWN,
+                STRUCTURE_CONTAINER, // Containers first for early resource collection
+                STRUCTURE_EXTENSION, // Extensions for more energy capacity
+                STRUCTURE_ROAD,      // Roads last
+                STRUCTURE_TOWER,
+                STRUCTURE_STORAGE,
+                STRUCTURE_LINK,
+                STRUCTURE_TERMINAL,
+                STRUCTURE_LAB,
+                STRUCTURE_FACTORY,
+                STRUCTURE_OBSERVER,
+                STRUCTURE_POWER_SPAWN,
+                STRUCTURE_NUKER
+            ];
+        } else if (room.controller.level <= 4) {
+            // RCL 3-4: Focus on towers, extensions, containers, then roads
+            structurePriority = [
+                STRUCTURE_SPAWN,
+                STRUCTURE_TOWER,     // Towers for defense
+                STRUCTURE_EXTENSION, // Extensions for more energy
+                STRUCTURE_CONTAINER, // Containers for resource collection
+                STRUCTURE_STORAGE,   // Storage at RCL 4
+                STRUCTURE_ROAD,      // Roads last
+                STRUCTURE_LINK,
+                STRUCTURE_TERMINAL,
+                STRUCTURE_LAB,
+                STRUCTURE_FACTORY,
+                STRUCTURE_OBSERVER,
+                STRUCTURE_POWER_SPAWN,
+                STRUCTURE_NUKER
+            ];
+        } else {
+            // RCL 5+: Standard priority
+            structurePriority = [
+                STRUCTURE_SPAWN,
+                STRUCTURE_EXTENSION,
+                STRUCTURE_TOWER,
+                STRUCTURE_STORAGE,
+                STRUCTURE_LINK,
+                STRUCTURE_TERMINAL,
+                STRUCTURE_CONTAINER,
+                STRUCTURE_LAB,
+                STRUCTURE_FACTORY,
+                STRUCTURE_OBSERVER,
+                STRUCTURE_ROAD,
+                STRUCTURE_POWER_SPAWN,
+                STRUCTURE_NUKER
+            ];
+        }
+        
+        // Further adjust priority based on specific needs
         if (room.controller.level <= 3) {
-            // Early game: prioritize extensions and containers over roads
+            // Early game: check if we need more extensions or containers
             const extensionCount = (structuresByType[STRUCTURE_EXTENSION] || []).length;
             const containerCount = (structuresByType[STRUCTURE_CONTAINER] || []).length;
             
-            if (extensionCount < 5 || containerCount < 2) {
-                // Move roads down in priority if we need more critical structures
-                const roadIndex = structurePriority.indexOf(STRUCTURE_ROAD);
-                if (roadIndex > 0) {
-                    structurePriority.splice(roadIndex, 1);
-                    structurePriority.push(STRUCTURE_ROAD);
+            // If we have enough containers but few extensions, prioritize extensions
+            if (containerCount >= 2 && extensionCount < 5 && room.controller.level >= 2) {
+                // Move extensions up in priority
+                const extensionIndex = structurePriority.indexOf(STRUCTURE_EXTENSION);
+                if (extensionIndex > 0) {
+                    structurePriority.splice(extensionIndex, 1);
+                    structurePriority.unshift(STRUCTURE_EXTENSION);
                 }
             }
         }
@@ -1860,6 +1917,42 @@ const constructionManagerImpl = {
             // Force more frequent checks until we reach our target
             room.memory.construction.lastUpdate = Game.time - 95; // Will trigger again in 5 ticks
         }
+    },
+    
+    /**
+     * Prioritize early game structures for RCL 1-2
+     * @param {Room} room - The room to check
+     * @returns {boolean} - True if planning was performed
+     */
+    prioritizeEarlyGameStructures: function(room) {
+        // Only run for RCL 1-2
+        if (room.controller.level > 2) return false;
+        
+        // Force immediate container placement near sources
+        if (room.controller.level >= 1 && 
+            (!room.memory.construction.containers || !room.memory.construction.containers.planned)) {
+            console.log(`[RCL ${room.controller.level}] Planning containers in ${room.name}`);
+            this.planContainers(room);
+            return true;
+        }
+        
+        // Force immediate road planning at RCL 1
+        if (room.controller.level >= 1 && 
+            (!room.memory.construction.roads || !room.memory.construction.roads.planned)) {
+            console.log(`[RCL ${room.controller.level}] Planning roads in ${room.name}`);
+            this.planRoads(room);
+            return true;
+        }
+        
+        // Force immediate extension planning at RCL 2
+        if (room.controller.level >= 2 && 
+            (!room.memory.construction.extensions || !room.memory.construction.extensions.planned)) {
+            console.log(`[RCL ${room.controller.level}] Planning extensions in ${room.name}`);
+            this.planExtensions(room);
+            return true;
+        }
+        
+        return false;
     },
     
     /**
