@@ -570,7 +570,7 @@ global.showCreeps = function(roomName) {
 };
 
 // Force construction site creation
-global.forceConstruction = function(roomName) {
+global.forceConstruction = function(roomName, count = 1) {
     const room = Game.rooms[roomName];
     if (!room) {
         return `No visibility in room ${roomName}`;
@@ -590,16 +590,97 @@ global.forceConstruction = function(roomName) {
         return `Created road plans for room ${roomName}. Run this command again to create sites.`;
     }
     
-    // Force create construction sites
+    // Check if we have a room plan
+    if (room.memory.roomPlan) {
+        // Force create construction sites using the room plan
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
+        
+        // Use the new force function
+        const created = constructionManager.forceConstructionSite(room, count);
+        
+        // Count how many sites were created
+        const newSites = room.find(FIND_CONSTRUCTION_SITES);
+        return `Force created ${created} construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
+    } else {
+        // Force run the construction manager
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
+        
+        // Force run the construction manager
+        constructionManager.run(room, true);
+        
+        // Count how many sites were created
+        const newSites = room.find(FIND_CONSTRUCTION_SITES);
+        return `Force created construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
+    }
+};
+
+// Force place a specific structure type
+global.forceStructure = function(roomName, structureType, count = 1) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    if (!room.memory.roomPlan) {
+        return `Room ${roomName} has no room plan. Generate one first with global.generateRoomPlan('${roomName}')`;
+    }
+    
+    const validTypes = {
+        'extension': STRUCTURE_EXTENSION,
+        'road': STRUCTURE_ROAD,
+        'container': STRUCTURE_CONTAINER,
+        'tower': STRUCTURE_TOWER,
+        'storage': STRUCTURE_STORAGE
+    };
+    
+    if (!validTypes[structureType]) {
+        return `Invalid structure type. Valid types: ${Object.keys(validTypes).join(', ')}`;
+    }
+    
+    const plan = room.memory.roomPlan;
+    const rclPlan = plan.rcl[room.controller.level];
+    
+    if (!rclPlan || !rclPlan.structures[validTypes[structureType]]) {
+        return `No ${structureType} positions found in the room plan for RCL ${room.controller.level}`;
+    }
+    
+    const positions = rclPlan.structures[validTypes[structureType]];
     const sites = room.find(FIND_CONSTRUCTION_SITES);
-    console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
+    let created = 0;
     
-    // Force run the construction manager
-    constructionManager.run(room, true);
+    // Create a map of existing structures and sites
+    const structureMap = new Map();
+    const structures = room.find(FIND_STRUCTURES);
+    for (const structure of structures) {
+        const key = `${structure.pos.x},${structure.pos.y}`;
+        structureMap.set(key, structure.structureType);
+    }
     
-    // Count how many sites were created
-    const newSites = room.find(FIND_CONSTRUCTION_SITES);
-    return `Force created construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
+    const siteMap = new Map();
+    for (const site of sites) {
+        const key = `${site.pos.x},${site.pos.y}`;
+        siteMap.set(key, site.structureType);
+    }
+    
+    // Try to place construction sites
+    for (let i = 0; i < positions.length && created < count; i++) {
+        const pos = positions[i];
+        const key = `${pos.x},${pos.y}`;
+        
+        // Skip if there's already a structure or site here
+        if (structureMap.has(key) || siteMap.has(key)) continue;
+        
+        // Create the construction site
+        const result = room.createConstructionSite(pos.x, pos.y, validTypes[structureType]);
+        if (result === OK) {
+            created++;
+            console.log(`FORCED: Created ${structureType} construction site at (${pos.x},${pos.y})`);
+        }
+    }
+    
+    return `Force created ${created} ${structureType} construction sites in ${roomName}`;
 };
 
 // Generate a complete room plan
@@ -656,6 +737,9 @@ global.visualizeRoomPlan = function(roomName, rcl = 0) {
 
 // Global function to check next planned construction sites
 global.checkNextConstructionSites = require('global.checkNextConstructionSites');
+
+// Global function to diagnose construction issues
+global.diagnosisConstruction = require('global.diagnosisConstruction');
 
 // Global error handler
 const errorHandler = function(error) {

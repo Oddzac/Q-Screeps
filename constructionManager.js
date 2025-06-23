@@ -1081,34 +1081,145 @@ const constructionManagerImpl = {
                 room.memory.construction.containers && 
                 room.memory.construction.containers.planned) {
                 // Place container construction sites
-                // Implementation details omitted for brevity
+                if (room.memory.construction.containers.positions) {
+                    for (const pos of room.memory.construction.containers.positions) {
+                        if (sitesPlaced >= sitesToPlace) break;
+                        
+                        // Check if already built or under construction
+                        const structureKey = `${pos.x},${pos.y},${STRUCTURE_CONTAINER}`;
+                        if (structureMap.has(structureKey) || siteMap.has(structureKey)) continue;
+                        
+                        // Create construction site
+                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
+                        if (result === OK) {
+                            sitesPlaced++;
+                            sitesPlacedForContainers++;
+                            siteMap.set(structureKey, true);
+                            console.log(`Created container construction site at (${pos.x},${pos.y})`);
+                            room.memory.construction.lastNonRoadTick = Game.time;
+                        }
+                    }
+                }
                 structureIndex++;
             } else if (structureType === 'extensions' && 
                 room.controller.level >= 2 && 
                 room.memory.construction.extensions && 
                 room.memory.construction.extensions.planned) {
                 // Place extension construction sites
-                // Implementation details omitted for brevity
+                if (room.memory.construction.extensions.positions) {
+                    // Get the maximum allowed extensions for current RCL
+                    const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level];
+                    
+                    // Count existing extensions
+                    const existingExtensions = _.filter(structures, s => s.structureType === STRUCTURE_EXTENSION).length;
+                    const extensionSites = _.filter(existingSites, s => s.structureType === STRUCTURE_EXTENSION).length;
+                    const totalExtensions = existingExtensions + extensionSites;
+                    
+                    // Only place more if we haven't reached the limit
+                    if (totalExtensions < maxExtensions) {
+                        for (const pos of room.memory.construction.extensions.positions) {
+                            if (sitesPlaced >= sitesToPlace) break;
+                            
+                            // Check if already built or under construction
+                            const structureKey = `${pos.x},${pos.y},${STRUCTURE_EXTENSION}`;
+                            if (structureMap.has(structureKey) || siteMap.has(structureKey)) continue;
+                            
+                            // Create construction site
+                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                            if (result === OK) {
+                                sitesPlaced++;
+                                sitesPlacedForExtensions++;
+                                siteMap.set(structureKey, true);
+                                console.log(`Created extension construction site at (${pos.x},${pos.y})`);
+                                room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
+                                room.memory.construction.lastNonRoadTick = Game.time;
+                            }
+                        }
+                    }
+                }
                 structureIndex++;
             } else if (structureType === 'roads' && 
                 room.memory.construction.roads && 
                 room.memory.construction.roads.planned) {
                 // Place road construction sites
-                // Implementation details omitted for brevity
+                if (room.memory.construction.roads.positions) {
+                    for (const pos of room.memory.construction.roads.positions) {
+                        if (sitesPlaced >= sitesToPlace) break;
+                        
+                        // Check if already built or under construction
+                        const structureKey = `${pos.x},${pos.y},${STRUCTURE_ROAD}`;
+                        if (structureMap.has(structureKey) || siteMap.has(structureKey)) continue;
+                        
+                        // Create construction site
+                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+                        if (result === OK) {
+                            sitesPlaced++;
+                            sitesPlacedForRoads++;
+                            siteMap.set(structureKey, true);
+                            console.log(`Created road construction site at (${pos.x},${pos.y})`);
+                        }
+                    }
+                }
                 structureIndex++;
             } else if (structureType === 'towers' && 
                 room.controller.level >= 3 && 
                 room.memory.construction.towers && 
                 room.memory.construction.towers.planned) {
                 // Place tower construction sites
-                // Implementation details omitted for brevity
+                if (room.memory.construction.towers.positions) {
+                    // Get the maximum allowed towers for current RCL
+                    const maxTowers = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level];
+                    
+                    // Count existing towers
+                    const existingTowers = _.filter(structures, s => s.structureType === STRUCTURE_TOWER).length;
+                    const towerSites = _.filter(existingSites, s => s.structureType === STRUCTURE_TOWER).length;
+                    const totalTowers = existingTowers + towerSites;
+                    
+                    // Only place more if we haven't reached the limit
+                    if (totalTowers < maxTowers) {
+                        for (const pos of room.memory.construction.towers.positions) {
+                            if (sitesPlaced >= sitesToPlace) break;
+                            
+                            // Check if already built or under construction
+                            const structureKey = `${pos.x},${pos.y},${STRUCTURE_TOWER}`;
+                            if (structureMap.has(structureKey) || siteMap.has(structureKey)) continue;
+                            
+                            // Create construction site
+                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
+                            if (result === OK) {
+                                sitesPlaced++;
+                                sitesPlacedForTowers++;
+                                siteMap.set(structureKey, true);
+                                console.log(`Created tower construction site at (${pos.x},${pos.y})`);
+                                room.memory.construction.towers.count = (room.memory.construction.towers.count || 0) + 1;
+                                room.memory.construction.lastNonRoadTick = Game.time;
+                            }
+                        }
+                    }
+                }
                 structureIndex++;
             } else if (structureType === 'storage' && 
                 room.controller.level >= 4 && 
                 room.memory.construction.storage && 
                 room.memory.construction.storage.planned) {
-                // Place storage construction sites
-                // Implementation details omitted for brevity
+                // Place storage construction site
+                if (room.memory.construction.storage.position) {
+                    const pos = room.memory.construction.storage.position;
+                    
+                    // Check if already built or under construction
+                    const structureKey = `${pos.x},${pos.y},${STRUCTURE_STORAGE}`;
+                    if (!structureMap.has(structureKey) && !siteMap.has(structureKey)) {
+                        // Create construction site
+                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
+                        if (result === OK) {
+                            sitesPlaced++;
+                            sitesPlacedForStorage++;
+                            siteMap.set(structureKey, true);
+                            console.log(`Created storage construction site at (${pos.x},${pos.y})`);
+                            room.memory.construction.lastNonRoadTick = Game.time;
+                        }
+                    }
+                }
                 structureIndex++;
             } else {
                 structureIndex++;
@@ -1123,6 +1234,17 @@ const constructionManagerImpl = {
         // Update the last attempted structure type
         if (structureOrder.length > 0) {
             room.memory.construction.lastStructureType = structureOrder[0];
+        }
+        
+        // Log if we placed any sites
+        if (sitesPlaced > 0) {
+            console.log(`Room ${room.name}: Placed ${sitesPlaced} construction sites (${sitesPlacedForExtensions} extensions, ${sitesPlacedForRoads} roads, ${sitesPlacedForContainers} containers, ${sitesPlacedForTowers} towers, ${sitesPlacedForStorage} storage)`);
+        } else if (Game.time % 100 === 0) {
+            // Periodically log next planned sites if nothing was placed
+            const nextSites = this.getNextConstructionSites(room, 5);
+            if (nextSites.length > 0) {
+                console.log(`Room ${room.name}: Next planned sites: ${nextSites.map(s => s.type).join(', ')}`);
+            }
         }
     },
     
@@ -1535,6 +1657,24 @@ const constructionManagerImpl = {
                     
                     // Add to site map to prevent duplicates
                     siteMap.set(structureKey, true);
+                    
+                    // Update structure-specific counters
+                    if (structureType === STRUCTURE_EXTENSION) {
+                        if (!room.memory.construction.extensions) {
+                            room.memory.construction.extensions = { planned: true, count: 0 };
+                        }
+                        room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
+                    } else if (structureType === STRUCTURE_TOWER) {
+                        if (!room.memory.construction.towers) {
+                            room.memory.construction.towers = { planned: true, count: 0 };
+                        }
+                        room.memory.construction.towers.count = (room.memory.construction.towers.count || 0) + 1;
+                    }
+                    
+                    // Update timestamp for non-road structures
+                    if (structureType !== STRUCTURE_ROAD) {
+                        room.memory.construction.lastNonRoadTick = Game.time;
+                    }
                 } else if (result !== ERR_FULL) {
                     console.log(`Failed to create ${structureType} construction site at (${pos.x},${pos.y}), result: ${result}`);
                 }
@@ -1567,6 +1707,119 @@ const constructionManagerImpl = {
             // Force more frequent checks until we reach our target
             room.memory.construction.lastUpdate = Game.time - 95; // Will trigger again in 5 ticks
         }
+    },
+    
+    /**
+     * Force construction site creation regardless of normal limits
+     * @param {Room} room - The room to create sites in
+     * @param {number} count - Number of sites to force create (default: 1)
+     * @returns {number} - Number of sites created
+     */
+    forceConstructionSite: function(room, count = 1) {
+        // Skip if no room plan
+        if (!room.memory.roomPlan) return 0;
+        
+        // Get the room plan for the current RCL
+        const plan = room.memory.roomPlan;
+        if (!plan || !plan.rcl || !plan.rcl[room.controller.level]) return 0;
+        
+        const rclPlan = plan.rcl[room.controller.level];
+        
+        // Create maps of existing structures and sites
+        const structureMap = new Map();
+        const structures = room.find(FIND_STRUCTURES);
+        for (const structure of structures) {
+            const key = `${structure.pos.x},${structure.pos.y},${structure.structureType}`;
+            structureMap.set(key, true);
+        }
+        
+        const siteMap = new Map();
+        const existingSites = room.find(FIND_CONSTRUCTION_SITES);
+        for (const site of existingSites) {
+            const key = `${site.pos.x},${site.pos.y},${site.structureType}`;
+            siteMap.set(key, true);
+        }
+        
+        // Define priority order for structure types
+        const structurePriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_TOWER,
+            STRUCTURE_STORAGE,
+            STRUCTURE_ROAD
+        ];
+        
+        let sitesCreated = 0;
+        
+        // Try each structure type in priority order
+        for (const structureType of structurePriority) {
+            if (sitesCreated >= count) break;
+            
+            // Skip if this structure type isn't in the plan
+            if (!rclPlan.structures[structureType] || rclPlan.structures[structureType].length === 0) continue;
+            
+            // Get the maximum allowed structures of this type
+            const maxStructures = rclPlan.maxStructures[structureType] || 0;
+            if (maxStructures === 0) continue;
+            
+            // Count existing structures of this type
+            const existingCount = _.filter(structures, s => s.structureType === structureType).length;
+            
+            // Skip if we've already built all allowed structures of this type
+            if (existingCount >= maxStructures) continue;
+            
+            // Get planned positions for this structure type
+            const positions = rclPlan.structures[structureType];
+            
+            // Try to place construction sites for this structure type
+            for (let i = 0; i < positions.length && sitesCreated < count; i++) {
+                const pos = positions[i];
+                
+                // Skip if out of bounds
+                if (pos.x < 0 || pos.x > 49 || pos.y < 0 || pos.y > 49) continue;
+                
+                // Check if there's already a structure or construction site here
+                const structureKey = `${pos.x},${pos.y},${structureType}`;
+                if (structureMap.has(structureKey) || siteMap.has(structureKey)) continue;
+                
+                // Check for any other structures at this position
+                const lookResult = room.lookAt(pos.x, pos.y);
+                let hasOtherStructure = false;
+                
+                for (const item of lookResult) {
+                    if (item.type === LOOK_STRUCTURES && 
+                        (structureType !== STRUCTURE_ROAD || item.structure.structureType !== STRUCTURE_RAMPART)) {
+                        hasOtherStructure = true;
+                        break;
+                    }
+                }
+                
+                if (hasOtherStructure) continue;
+                
+                // Create construction site
+                const result = room.createConstructionSite(pos.x, pos.y, structureType);
+                if (result === OK) {
+                    sitesCreated++;
+                    console.log(`FORCED: Created ${structureType} construction site at (${pos.x},${pos.y})`);
+                    
+                    // Update structure-specific counters
+                    if (structureType === STRUCTURE_EXTENSION) {
+                        if (!room.memory.construction.extensions) {
+                            room.memory.construction.extensions = { planned: true, count: 0 };
+                        }
+                        room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
+                    } else if (structureType === STRUCTURE_TOWER) {
+                        if (!room.memory.construction.towers) {
+                            room.memory.construction.towers = { planned: true, count: 0 };
+                        }
+                        room.memory.construction.towers.count = (room.memory.construction.towers.count || 0) + 1;
+                    }
+                }
+            }
+        }
+        
+        return sitesCreated;
     },
     
     /**
