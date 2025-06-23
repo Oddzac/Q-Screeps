@@ -350,13 +350,7 @@ const construction = {
     optimizer: optimizer
 };
 
-// Copy all methods from constructionManager
-const constructionManager = require('constructionManager');
-for (const key in constructionManager) {
-    if (typeof constructionManager[key] === 'function' && !construction[key]) {
-        construction[key] = constructionManager[key];
-    }
-}
+
 
 // Add missing methods for analysis
 construction.getNextConstructionSites = function(room, limit = 10) {
