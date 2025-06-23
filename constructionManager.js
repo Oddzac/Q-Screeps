@@ -3,6 +3,7 @@
  * CPU optimized for maximum efficiency
  */
 const utils = require('utils');
+const optimizer = require('roomOptimizer');
 
 // Original module implementation
 const constructionManagerImpl = {
@@ -34,18 +35,10 @@ const constructionManagerImpl = {
             };
         }
         
-        // Always update construction site count for roomManager
-        this.updateConstructionSiteCount(room);
-        
-        // Sync structure counts periodically
-        if (force || Game.time % 100 === 0) {
-            this.syncStructureCounts(room);
-        }
-        
-        // Run more frequently in simulation rooms
+        // Run more frequently in simulation rooms, less frequently in normal rooms
         const interval = isSimulation ? 5 : // Every 5 ticks in simulation
             (global.emergencyMode ? 
-                (global.emergencyMode.level === 'critical' ? 500 : 100) : 25);
+                (global.emergencyMode.level === 'critical' ? 1000 : 200) : 100); // Increased intervals
             
         if (!force && Game.time % interval !== 0) return;
         
@@ -55,11 +48,26 @@ const constructionManagerImpl = {
         // Skip if CPU conditions don't allow for construction tasks
         if (!utils.shouldExecute('low')) return;
         
+        // Update construction site count only when needed
+        const sitesNeedUpdate = !room.memory.constructionSites || 
+                              Game.time - (room.memory._lastSiteCount || 0) > 50;
+        if (force || sitesNeedUpdate) {
+            this.updateConstructionSiteCount(room);
+            room.memory._lastSiteCount = Game.time;
+        }
+        
+        // Sync structure counts periodically (less frequently)
+        if (force || Game.time % 500 === 0) { // Increased from 200 to 500
+            this.syncStructureCounts(room);
+        }
+        
         // Check if room has evolved and needs plan updates
-        this.checkRoomEvolution(room);
+        if (force || room.controller.level !== (room.memory.construction.lastRCL || 0)) {
+            this.checkRoomEvolution(room);
+        }
         
         // Check if we need to generate a complete room plan
-        if (!room.memory.roomPlan && (force || Game.time % 500 === 0)) {
+        if (!room.memory.roomPlan && (force || Game.time % 1000 === 0)) { // Increased from 500 to 1000
             console.log(`Generating complete room plan for ${room.name}`);
             this.generateRoomPlan(room);
             // Visualize the plan
@@ -69,19 +77,18 @@ const constructionManagerImpl = {
         
         // If we have a room plan, use it for construction
         if (room.memory.roomPlan) {
-            // Check plan alignment periodically
-            if (force || Game.time % 500 === 0) {
-                this.checkPlanAlignment(room);
+            // Only create sites if we have fewer than target
+            const siteCache = optimizer.getCachedConstructionSites(room);
+            if (siteCache.count < 5 || force) {
+                // Create construction sites based on the room plan
+                this.createConstructionSitesFromPlan(room);
+                
+                // Update timestamp
+                room.memory.construction.lastUpdate = Game.time;
             }
             
-            // Create construction sites based on the room plan
-            this.createConstructionSitesFromPlan(room);
-            
-            // Update timestamp
-            room.memory.construction.lastUpdate = Game.time;
-            
-            // Periodically visualize the plan
-            if (Game.time % 100 === 0) {
+            // Periodically visualize the plan (much less frequently)
+            if (Game.time % 500 === 0) { // Reduced frequency from 200 to 500
                 this.visualizeRoomPlan(room, room.controller.level);
             }
             
@@ -1491,13 +1498,19 @@ const constructionManagerImpl = {
      * @param {Room} room - The room to sync
      */
     syncStructureCounts: function(room) {
+        // Only run this check occasionally to save CPU
+        if (Game.time % 500 !== 0 && !room.memory._forceSync) return; // Increased from 200 to 500
+        if (room.memory._forceSync) delete room.memory._forceSync;
+        
+        // Skip if CPU is too high
+        if (Game.cpu.getUsed() > Game.cpu.limit * 0.7) return;
+        
         if (!room.memory.construction) {
             room.memory.construction = {};
         }
         
-        // Find all structures in the room
-        const structures = room.find(FIND_STRUCTURES);
-        const structuresByType = _.groupBy(structures, s => s.structureType);
+        // Use cached structure data
+        const structuresByType = optimizer.getCachedStructuresByType(room);
         
         // Update extension count
         const extensions = structuresByType[STRUCTURE_EXTENSION] || [];
@@ -1505,7 +1518,6 @@ const constructionManagerImpl = {
             room.memory.construction.extensions = { planned: true, count: 0 };
         }
         if (room.memory.construction.extensions.count !== extensions.length) {
-            console.log(`Syncing extension count in ${room.name}: ${room.memory.construction.extensions.count} -> ${extensions.length}`);
             room.memory.construction.extensions.count = extensions.length;
         }
         
@@ -1515,12 +1527,11 @@ const constructionManagerImpl = {
             room.memory.construction.towers = { planned: true, count: 0 };
         }
         if (room.memory.construction.towers.count !== towers.length) {
-            console.log(`Syncing tower count in ${room.name}: ${room.memory.construction.towers.count} -> ${towers.length}`);
             room.memory.construction.towers.count = towers.length;
         }
         
-        // Check for misaligned structures if we have a room plan
-        if (room.memory.roomPlan && Game.time % 500 === 0) {
+        // Check for misaligned structures if we have a room plan (very infrequently)
+        if (room.memory.roomPlan && Game.time % 2000 === 0) { // Increased from 1000 to 2000
             this.checkPlanAlignment(room);
         }
     },
@@ -1532,20 +1543,30 @@ const constructionManagerImpl = {
     checkPlanAlignment: function(room) {
         if (!room.memory.roomPlan) return;
         
+        // Only run this check very occasionally to save CPU
+        if (Game.time % 2000 !== 0 && !room.memory._forcePlanCheck) return; // Increased from 1000 to 2000
+        if (room.memory._forcePlanCheck) delete room.memory._forcePlanCheck;
+        
+        // Skip if CPU is too high
+        if (Game.cpu.getUsed() > Game.cpu.limit * 0.6) return;
+        
         const rcl = room.controller.level;
         const rclPlan = room.memory.roomPlan.rcl[rcl];
         if (!rclPlan) return;
         
-        // Find all structures in the room
-        const structures = room.find(FIND_STRUCTURES);
-        const structuresByType = _.groupBy(structures, s => s.structureType);
+        // Use cached structure data from optimizer
+        const structuresByType = optimizer.getCachedStructuresByType(room);
         
-        // Create position maps for planned structures
+        // Create position maps for planned structures (only for types we have)
         const plannedPositions = {};
-        for (const structureType in rclPlan.structures) {
-            plannedPositions[structureType] = new Set();
-            for (const pos of rclPlan.structures[structureType]) {
-                plannedPositions[structureType].add(`${pos.x},${pos.y}`);
+        const relevantTypes = Object.keys(structuresByType);
+        
+        for (const structureType of relevantTypes) {
+            if (rclPlan.structures[structureType]) {
+                plannedPositions[structureType] = new Set();
+                for (const pos of rclPlan.structures[structureType]) {
+                    plannedPositions[structureType].add(`${pos.x},${pos.y}`);
+                }
             }
         }
         
@@ -1571,18 +1592,13 @@ const constructionManagerImpl = {
             }
         }
         
-        // Log results
+        // Only update memory if there are changes
         if (misalignedCount > 0) {
-            console.log(`Room ${room.name} has ${misalignedCount} misaligned structures`);
-            
             // Store misaligned structures in memory for potential removal
-            if (!room.memory.construction.misaligned) {
-                room.memory.construction.misaligned = [];
-            }
             room.memory.construction.misaligned = misaligned;
             
-            // If we have too many misaligned structures, consider replacing one
-            if (misalignedCount > 3 && Game.time % 1000 === 0) {
+            // If we have too many misaligned structures, consider replacing one (but not too often)
+            if (misalignedCount > 5 && Game.time % 5000 === 0) { // Only replace structures very infrequently
                 this.replaceSuboptimalStructure(room);
             }
         } else if (room.memory.construction.misaligned) {
@@ -1592,16 +1608,38 @@ const constructionManagerImpl = {
     },
     
     /**
+     * Get cached structure data by type
+     * @private
+     * @param {Room} room - The room to get structures for
+     * @returns {Object} - Structures grouped by type
+     */
+    _getCachedStructuresByType: function(room) {
+        return optimizer.getCachedStructuresByType(room);
+    },
+    
+    /**
+     * Check if a position has structures that would block placement
+     * @private
+     * @param {Room} room - The room to check
+     * @param {Object} pos - Position {x, y}
+     * @param {string} structureType - Type of structure to place
+     * @returns {boolean} - True if position has blocking structures
+     */
+    _hasBlockingStructure: function(room, pos, structureType) {
+        return optimizer.hasBlockingStructure(room, pos, structureType);
+    },
+    
+    /**
      * Update the construction site count in room memory
      * @param {Room} room - The room to update
      */
     updateConstructionSiteCount: function(room) {
-        // Find all construction sites in the room
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        // Use the optimizer to get cached site data
+        const siteCache = optimizer.getCachedConstructionSites(room);
         
-        // Update room memory
-        room.memory.constructionSites = sites.length;
-        room.memory.constructionSiteIds = sites.map(site => site.id);
+        // Update room memory (only store count and IDs, not full objects)
+        room.memory.constructionSites = siteCache.count;
+        room.memory.constructionSiteIds = siteCache.ids;
         
         // Initialize construction memory if needed
         if (!room.memory.construction) {
@@ -1615,15 +1653,17 @@ const constructionManagerImpl = {
             };
         }
         
-        // Check if we need to create more sites
+        // Check if we need to create more sites, but don't do it too often
         const TARGET_SITES_PER_ROOM = 5;
-        if (sites.length < TARGET_SITES_PER_ROOM) {
-            // If we have a room plan and CPU is available, try to create sites immediately
-            if (room.memory.roomPlan && Game.cpu.bucket > 1000) {
-                this.createConstructionSitesFromPlan(room);
-            } else if (!room.memory.construction.lastUpdate || Game.time - room.memory.construction.lastUpdate >= 20) {
-                // Otherwise, schedule for next tick
-                room.memory.construction.lastUpdate = Game.time - 95; // Will trigger in 5 ticks
+        if (siteCache.count < TARGET_SITES_PER_ROOM && 
+            (!room.memory._lastSiteCreation || Game.time - room.memory._lastSiteCreation > 200)) { // Increased from 100 to 200
+            // If we have a room plan and CPU is available, try to create sites
+            if (room.memory.roomPlan && Game.cpu.bucket > 4000) { // Increased bucket threshold from 3000 to 4000
+                room.memory._lastSiteCreation = Game.time;
+                // Don't create sites if CPU is too low
+                if (Game.cpu.getUsed() < Game.cpu.limit * 0.5) {
+                    this.createConstructionSitesFromPlan(room);
+                }
             }
         }
     },
@@ -1640,19 +1680,17 @@ const constructionManagerImpl = {
         
         if (globalSiteCount >= MAX_GLOBAL_SITES) return;
         
-        // Count existing construction sites in this room
-        const existingSites = room.find(FIND_CONSTRUCTION_SITES);
+        // Use the optimizer to get cached site data
+        const siteCache = optimizer.getCachedConstructionSites(room);
+        const existingSites = siteCache.sites;
         
         // If we already have enough sites, check if we should replace suboptimal structures
         if (existingSites.length >= TARGET_SITES_PER_ROOM) {
-            // Update room memory with current construction site count and IDs
-            room.memory.constructionSites = existingSites.length;
-            room.memory.constructionSiteIds = existingSites.map(site => site.id);
             return;
         }
         
-        // Check if we should replace a suboptimal structure
-        if (existingSites.length < TARGET_SITES_PER_ROOM && Game.time % 50 === 0) {
+        // Check if we should replace a suboptimal structure (less frequently)
+        if (existingSites.length < TARGET_SITES_PER_ROOM && Game.time % 500 === 0) { // Reduced frequency from 200 to 500
             if (this.replaceSuboptimalStructure(room)) {
                 // We replaced a structure, wait until next time to place more sites
                 return;
@@ -1671,20 +1709,12 @@ const constructionManagerImpl = {
         
         const rclPlan = plan.rcl[room.controller.level];
         
-        // Create a map of existing structures for faster lookups
-        const structureMap = new Map();
-        const structures = room.find(FIND_STRUCTURES);
-        for (const structure of structures) {
-            const key = `${structure.pos.x},${structure.pos.y},${structure.structureType}`;
-            structureMap.set(key, true);
-        }
+        // Use cached structure data
+        const structuresByType = optimizer.getCachedStructuresByType(room);
         
-        // Create a map of existing construction sites for faster lookups
-        const siteMap = new Map();
-        for (const site of existingSites) {
-            const key = `${site.pos.x},${site.pos.y},${site.structureType}`;
-            siteMap.set(key, true);
-        }
+        // Create maps of existing structures and sites for faster lookups
+        const structureMap = optimizer.createStructureMap(room);
+        const siteMap = optimizer.createSiteMap(room);
         
         // Define priority order for structure types
         // Prioritize critical infrastructure first
@@ -1707,8 +1737,8 @@ const constructionManagerImpl = {
         // Adjust priority based on RCL and existing structures
         if (room.controller.level <= 3) {
             // Early game: prioritize extensions and containers over roads
-            const extensionCount = _.filter(structures, s => s.structureType === STRUCTURE_EXTENSION).length;
-            const containerCount = _.filter(structures, s => s.structureType === STRUCTURE_CONTAINER).length;
+            const extensionCount = (structuresByType[STRUCTURE_EXTENSION] || []).length;
+            const containerCount = (structuresByType[STRUCTURE_CONTAINER] || []).length;
             
             if (extensionCount < 5 || containerCount < 2) {
                 // Move roads down in priority if we need more critical structures

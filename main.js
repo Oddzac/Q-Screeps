@@ -770,6 +770,7 @@ global.replaceMisalignedStructure = function(roomName) {
     const constructionManager = require('constructionManager');
     
     // First check for misaligned structures
+    room.memory._forcePlanCheck = true;
     constructionManager.checkPlanAlignment(room);
     
     // Then try to replace one
@@ -780,6 +781,26 @@ global.replaceMisalignedStructure = function(roomName) {
     } else {
         return `No misaligned structures found in ${roomName}`;  
     }
+};
+
+// Global function to clear room optimizer caches
+global.clearRoomCaches = function() {
+    const optimizer = require('roomOptimizer');
+    optimizer.init();
+    optimizer.cleanupCaches();
+    
+    // Clear global caches
+    global._structureCache = {};
+    global._siteCache = {};
+    global._lookAtCache = {};
+    global._roomCache = {
+        structures: {},
+        sites: {},
+        lookAt: {},
+        lastCleanup: Game.time
+    };
+    
+    return 'All room caches cleared';
 };
 
 // Global error handler
