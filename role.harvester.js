@@ -3,6 +3,8 @@
  * CPU optimized for maximum efficiency
  */
 const roomManager = require('roomManager');
+const utils = require('utils');
+const helpers = require('helpers');
 
 const roleHarvester = {
     /**
@@ -10,7 +12,6 @@ const roleHarvester = {
      * @param {Creep} creep - The creep to run the role for
      */
     run: function(creep) {
-        const utils = require('utils');
         const movementManager = require('movementManager');
         
         // If creep is dying, release its source
@@ -18,7 +19,7 @@ const roleHarvester = {
             try {
                 roomManager.releaseSource(creep.memory.sourceId, creep.memory.homeRoom);
             } catch (e) {
-                utils.logError(`harvester_release_${creep.name}`, `Failed to release source: ${e}`, 50);
+                helpers.logError(`harvester_release_${creep.name}`, `Failed to release source: ${e}`, 50);
             }
             creep.memory.sourceId = null;
         }
@@ -27,7 +28,7 @@ const roleHarvester = {
         if (creep.memory.sourceId && Game.time % 50 === 0) {
             const source = Game.getObjectById(creep.memory.sourceId);
             if (!source) {
-                utils.logError(`harvester_invalid_source_${creep.name}`, 
+                helpers.logError(`harvester_invalid_source_${creep.name}`, 
                     `Source ${creep.memory.sourceId} no longer exists, reassigning`, 100);
                 creep.memory.sourceId = null;
             }
@@ -60,7 +61,7 @@ const roleHarvester = {
             try {
                 source = roomManager.getBestSource(creep.room);
             } catch (e) {
-                utils.logError(`harvester_getsource_${creep.name}`, `Failed to get source: ${e}`, 50);
+                helpers.logError(`harvester_getsource_${creep.name}`, `Failed to get source: ${e}`, 50);
             }
             
             if (source) {
@@ -75,12 +76,12 @@ const roleHarvester = {
                 if (!source && Game.time % 10 === 0) { // Only try occasionally to save CPU
                     const sources = creep.room.find(FIND_SOURCES);
                     if (sources.length > 0) {
-                        // Use availability-based selection for fallback
-                        source = utils.findBestSourceByAvailability(creep.room, sources);
-                        if (source) {
+                        // Use the first available source as fallback
+                        if (sources.length > 0) {
+                            source = sources[0];
                             creep.memory.sourceId = source.id;
                             creep.memory.sourcePos = {x: source.pos.x, y: source.pos.y, roomName: source.pos.roomName};
-                            utils.logError(`harvester_fallback_${creep.name}`, 
+                            helpers.logError(`harvester_fallback_${creep.name}`, 
                                 `Using fallback source assignment: ${source.id}`, 100);
                         }
                     }
@@ -176,7 +177,7 @@ const roleHarvester = {
                     source.pos.roomName
                 );
                 
-                isSafe = utils.isSafeFromKeepers(sourcePos);
+                isSafe = helpers.isSafeFromKeepers(sourcePos);
                 
                 // Cache result for 100 ticks
                 global.sourceCache[safetyKey] = isSafe;
@@ -184,7 +185,7 @@ const roleHarvester = {
             
             if (!isSafe) {
                 // Source is near a keeper, release it and find a new one
-                utils.logError(`harvester_keeper_${creep.name}`, 
+                helpers.logError(`harvester_keeper_${creep.name}`, 
                     `Source ${source.id} is near a Source Keeper, abandoning`, 200);
                     
                 roomManager.releaseSource(creep.memory.sourceId, creep.memory.homeRoom);

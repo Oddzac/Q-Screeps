@@ -1,6 +1,8 @@
 /**
  * Movement Manager - CPU optimized movement with path caching
  */
+const helpers = require('helpers');
+
 const movementManager = {
     // Cache for path finding operations
     pathCache: {},

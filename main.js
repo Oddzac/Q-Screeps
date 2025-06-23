@@ -17,6 +17,8 @@ const remoteManager = require('remoteManager');
 const movementManager = require('movementManager');
 const recoveryManager = require('recoveryManager');
 const utils = require('utils');
+const helpers = require('helpers');
+const memoryManager = require('memoryManager');
 
 // Global performance tracking
 global.stats = {
@@ -853,86 +855,20 @@ module.exports.loop = function() {
     const cpuStart = Game.cpu.getUsed();
     const currentTick = Game.time;
     
+    // Initialize memory structures at game start
+    if (!global.initialized) {
+        memoryManager.initialize();
+        global.initialized = true;
+    }
+    
     // Memory cleanup and validation - only run every 20 ticks to save CPU
     if (currentTick % 20 === 0) {
         const memStart = Game.cpu.getUsed();
         
-        // Process memory cleanup in chunks to distribute CPU load
-        if (!global.memoryCleanupState) {
-            global.memoryCleanupState = {
-                phase: 'creeps',
-                creepNames: Object.keys(Memory.creeps),
-                roomNames: Object.keys(Memory.rooms),
-                creepIndex: 0,
-                roomIndex: 0
-            };
-        }
+        // Use the memory manager for cleanup
+        memoryManager.cleanup();
         
-        const state = global.memoryCleanupState;
-        const ITEMS_PER_BATCH = 10;
-        
-        if (state.phase === 'creeps') {
-            // Process a batch of creeps
-            const endIdx = Math.min(state.creepIndex + ITEMS_PER_BATCH, state.creepNames.length);
-            
-            for (let i = state.creepIndex; i < endIdx; i++) {
-                const name = state.creepNames[i];
-                if (!Game.creeps[name]) {
-                    // If creep had a source assigned, release it
-                    if (Memory.creeps[name].sourceId && Memory.creeps[name].homeRoom) {
-                        try {
-                            roomManager.releaseSource(Memory.creeps[name].sourceId, Memory.creeps[name].homeRoom);
-                        } catch (e) {
-                            console.log(`Error releasing source for dead creep ${name}: ${e}`);
-                        }
-                    }
-                    delete Memory.creeps[name];
-                }
-            }
-            
-            state.creepIndex = endIdx;
-            
-            // If we've processed all creeps, move to rooms phase
-            if (state.creepIndex >= state.creepNames.length) {
-                state.phase = 'rooms';
-                state.creepIndex = 0;
-            }
-        } else if (state.phase === 'rooms') {
-            // Process a batch of rooms
-            const endIdx = Math.min(state.roomIndex + ITEMS_PER_BATCH, state.roomNames.length);
-            
-            for (let i = state.roomIndex; i < endIdx; i++) {
-                const roomName = state.roomNames[i];
-                if (!Game.rooms[roomName] || !Game.rooms[roomName].controller || !Game.rooms[roomName].controller.my) {
-                    // Room is not visible or not owned, keep minimal data
-                    if (Memory.rooms[roomName]) {
-                        const reservationStatus = Memory.rooms[roomName].reservation;
-                        Memory.rooms[roomName] = { 
-                            lastSeen: Game.time,
-                            reservation: reservationStatus
-                        };
-                    }
-                } else {
-                    // Ensure critical memory structures exist
-                    if (!Memory.rooms[roomName].sources) Memory.rooms[roomName].sources = {};
-                    if (!Memory.rooms[roomName].construction) {
-                        Memory.rooms[roomName].construction = {
-                            roads: { planned: false },
-                            extensions: { planned: false, count: 0 },
-                            lastUpdate: 0
-                        };
-                    }
-                }
-            }
-            
-            state.roomIndex = endIdx;
-            
-            // If we've processed all rooms, reset state for next time
-            if (state.roomIndex >= state.roomNames.length) {
-                global.memoryCleanupState = null;
-            }
-        }
-        
+        // Track CPU usage for memory cleanup
         global.stats.cpu.memoryCleanup = Game.cpu.getUsed() - memStart;
     }
     
@@ -1220,14 +1156,12 @@ module.exports.loop = function() {
     global.stats.cpu.total = totalCpuUsed;
     global.stats.cpu.ticks++;
     
+    // Track CPU usage with memory manager
+    memoryManager.trackCpuUsage();
+    
     // CPU emergency recovery mode
     const cpuLimit = Game.cpu.limit || 20;
     const cpuPercentage = totalCpuUsed / cpuLimit;
-    
-    // Track CPU usage trend
-    if (!global.cpuHistory) global.cpuHistory = [];
-    global.cpuHistory.push(cpuPercentage);
-    if (global.cpuHistory.length > 10) global.cpuHistory.shift();
     
     // Calculate average CPU usage over last 10 ticks
     const avgCpuUsage = global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length;
@@ -1304,6 +1238,9 @@ module.exports.loop = function() {
         
         // Clean up any cache keys that were accidentally stored in Memory
         utils.cleanupMemoryCache();
+        
+        // Log memory statistics
+        memoryManager.logMemoryStats();
     }
     } catch (error) {
         errorHandler(error);

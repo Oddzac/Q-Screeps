@@ -4,8 +4,8 @@
  */
 const utils = require('utils');
 const optimizer = require('roomOptimizer');
+const helpers = require('helpers');
 
-// Original module implementation
 const constructionManagerImpl = {
     /**
      * Run the construction manager for a room
@@ -13,27 +13,14 @@ const constructionManagerImpl = {
      * @param {boolean} force - Force run regardless of interval
      */
     run: function(room, force = false) {
-        const utils = require('utils');
-        
         // Check if we're in a simulation room
         const isSimulation = room.name.startsWith('sim');
         
-        // Initialize room memory if needed
-        if (!room.memory) {
-            room.memory = {};
-        }
+        // Initialize room and construction memory if needed
+        this._initializeRoomMemory(room);
         
-        // Initialize construction memory if needed
-        if (!room.memory.construction) {
-            room.memory.construction = {
-                roads: { planned: false },
-                extensions: { planned: false, count: 0 },
-                containers: { planned: false },
-                storage: { planned: false },
-                towers: { planned: false, count: 0 },
-                lastUpdate: 0
-            };
-        }
+        // Skip if we don't own the controller
+        if (!room.controller || !room.controller.my) return;
         
         // Run more frequently in simulation rooms and early RCL, less frequently in higher RCL rooms
         const interval = isSimulation ? 5 : // Every 5 ticks in simulation
@@ -42,9 +29,6 @@ const constructionManagerImpl = {
                 (global.emergencyMode.level === 'critical' ? 1000 : 200) : 100));
             
         if (!force && Game.time % interval !== 0) return;
-        
-        // Skip if we don't own the controller
-        if (!room.controller || !room.controller.my) return;
         
         // Skip if CPU conditions don't allow for construction tasks
         // Lower CPU threshold for early RCL
@@ -109,14 +93,6 @@ const constructionManagerImpl = {
             this.generateRoomPlan(room);
             return;
         }
-        
-        // Legacy planning logic for rooms without a complete plan
-        // Ensure all required construction memory properties exist
-        if (!room.memory.construction.roads) room.memory.construction.roads = { planned: false };
-        if (!room.memory.construction.extensions) room.memory.construction.extensions = { planned: false, count: 0 };
-        if (!room.memory.construction.containers) room.memory.construction.containers = { planned: false };
-        if (!room.memory.construction.storage) room.memory.construction.storage = { planned: false };
-        if (!room.memory.construction.towers) room.memory.construction.towers = { planned: false, count: 0 };
         
         // Plan roads if not already planned
         if (!room.memory.construction.roads || !room.memory.construction.roads.planned) {
@@ -278,17 +254,7 @@ const constructionManagerImpl = {
                 if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
                 
                 // Score based on adjacent walkable tiles
-                let score = 0;
-                for (let ndx = -1; ndx <= 1; ndx++) {
-                    for (let ndy = -1; ndy <= 1; ndy++) {
-                        const nx = x + ndx;
-                        const ny = y + ndy;
-                        if (nx >= 0 && nx < 50 && ny >= 0 && ny < 50 && 
-                            terrain.get(nx, ny) !== TERRAIN_MASK_WALL) {
-                            score++;
-                        }
-                    }
-                }
+                const score = this._calculatePositionScore(terrain, x, y);
                 
                 if (score > bestScore) {
                     bestScore = score;
@@ -326,15 +292,13 @@ const constructionManagerImpl = {
                 
                 // Count adjacent plains tiles
                 let plainsCount = 0;
-                for (let ndx = -1; ndx <= 1; ndx++) {
-                    for (let ndy = -1; ndy <= 1; ndy++) {
-                        const nx = x + ndx;
-                        const ny = y + ndy;
-                        if (nx >= 0 && nx < 50 && ny >= 0 && ny < 50) {
-                            const terrainType = terrain.get(nx, ny);
-                            if (terrainType === 0) { // Plains
-                                plainsCount++;
-                            }
+                for (let nx = -1; nx <= 1; nx++) {
+                    for (let ny = -1; ny <= 1; ny++) {
+                        const ax = x + nx;
+                        const ay = y + ny;
+                        if (ax >= 0 && ax < 50 && ay >= 0 && ay < 50 && 
+                            terrain.get(ax, ay) === 0) { // Plains
+                            plainsCount++;
                         }
                     }
                 }
@@ -348,6 +312,29 @@ const constructionManagerImpl = {
         }
         
         return bestPos;
+    },
+    
+    /**
+     * Calculate position score based on adjacent walkable tiles
+     * @private
+     * @param {RoomTerrain} terrain - Room terrain
+     * @param {number} x - X coordinate
+     * @param {number} y - Y coordinate
+     * @returns {number} - Position score
+     */
+    _calculatePositionScore: function(terrain, x, y) {
+        return helpers.calculatePositionScore(terrain, x, y);
+    },
+    
+    /**
+     * Create a map of planned positions for each structure type
+     * @private
+     * @param {Object} rclPlan - Room plan for current RCL
+     * @param {Array} relevantTypes - Optional array of structure types to include
+     * @returns {Object} - Map of structure types to sets of position strings
+     */
+    _createPlannedPositionsMap: function(rclPlan, relevantTypes = null) {
+        return helpers.createPlannedPositionsMap(rclPlan, relevantTypes);
     },
     
     /**
@@ -390,17 +377,7 @@ const constructionManagerImpl = {
                     }
                     
                     // Calculate score based on adjacent walkable tiles
-                    let score = 0;
-                    for (let nx = -1; nx <= 1; nx++) {
-                        for (let ny = -1; ny <= 1; ny++) {
-                            const ax = x + nx;
-                            const ay = y + ny;
-                            if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
-                                terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
-                                score++;
-                            }
-                        }
-                    }
+                    const score = this._calculatePositionScore(terrain, x, y);
                     
                     // Higher score means more accessible position
                     if (score > bestScore) {
@@ -439,23 +416,9 @@ const constructionManagerImpl = {
      * @returns {boolean} - True if position is safe
      */
     isSafeFromSourceKeepers: function(room, pos, safeDistance = 5) {
-        // Find all source keeper lairs in the room
-        const keeperLairs = room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_KEEPER_LAIR
-        });
-        
-        // If no keeper lairs, position is safe
-        if (keeperLairs.length === 0) return true;
-        
-        // Check distance to each keeper lair
-        for (const lair of keeperLairs) {
-            const distance = Math.abs(lair.pos.x - pos.x) + Math.abs(lair.pos.y - pos.y);
-            if (distance <= safeDistance) {
-                return false; // Too close to a keeper lair
-            }
-        }
-        
-        return true; // Safe from all keeper lairs
+        // Convert to RoomPosition if needed
+        const roomPos = pos.roomName ? pos : new RoomPosition(pos.x, pos.y, room.name);
+        return helpers.isSafeFromKeepers(roomPos, safeDistance);
     },
     
     /**
@@ -491,16 +454,7 @@ const constructionManagerImpl = {
                 let score = 4 - dist; // Prefer closer positions
                 
                 // Add score for adjacent walkable tiles
-                for (let nx = -1; nx <= 1; nx++) {
-                    for (let ny = -1; ny <= 1; ny++) {
-                        const ax = x + nx;
-                        const ay = y + ny;
-                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
-                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
-                            score++;
-                        }
-                    }
-                }
+                score += this._calculatePositionScore(terrain, x, y);
                 
                 if (score > bestScore) {
                     bestScore = score;
@@ -570,67 +524,7 @@ const constructionManagerImpl = {
      * @returns {Object|null} - Position object or null if no valid position
      */
     findTowerPosition: function(room, anchorPos, minRange, maxRange, existingPositions = []) {
-        const terrain = room.getTerrain();
-        let bestPos = null;
-        let bestScore = -1;
-        
-        // Check positions in a square around the anchor
-        for (let dx = -maxRange; dx <= maxRange; dx++) {
-            for (let dy = -maxRange; dy <= maxRange; dy++) {
-                const x = anchorPos.x + dx;
-                const y = anchorPos.y + dy;
-                
-                // Skip if out of bounds or on a wall
-                if (x <= 2 || y <= 2 || x >= 47 || y >= 47 || 
-                    terrain.get(x, y) === TERRAIN_MASK_WALL) {
-                    continue;
-                }
-                
-                // Calculate Manhattan distance
-                const distance = Math.abs(dx) + Math.abs(dy);
-                
-                // Skip if too close or too far
-                if (distance < minRange || distance > maxRange) {
-                    continue;
-                }
-                
-                // Skip if too close to existing positions
-                let tooClose = false;
-                for (const pos of existingPositions) {
-                    if (Math.abs(pos.x - x) + Math.abs(pos.y - y) < 3) {
-                        tooClose = true;
-                        break;
-                    }
-                }
-                if (tooClose) continue;
-                
-                // Calculate score based on open space and distance
-                let score = 0;
-                
-                // Prefer positions with open space around them
-                for (let nx = -1; nx <= 1; nx++) {
-                    for (let ny = -1; ny <= 1; ny++) {
-                        const ax = x + nx;
-                        const ay = y + ny;
-                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
-                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
-                            score++;
-                        }
-                    }
-                }
-                
-                // Adjust score based on distance (prefer middle of range)
-                const distanceScore = maxRange - Math.abs(distance - (minRange + maxRange) / 2);
-                score += distanceScore;
-                
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestPos = { x, y };
-                }
-            }
-        }
-        
-        return bestPos;
+        return helpers.findBestPosition(room, anchorPos, minRange, maxRange, existingPositions);
     },
     
     /**
@@ -966,16 +860,7 @@ const constructionManagerImpl = {
                 let score = 10 - dist; // Prefer closer positions
                 
                 // Add score for adjacent walkable tiles
-                for (let nx = -1; nx <= 1; nx++) {
-                    for (let ny = -1; ny <= 1; ny++) {
-                        const ax = x + nx;
-                        const ay = y + ny;
-                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
-                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
-                            score++;
-                        }
-                    }
-                }
+                score += this._calculatePositionScore(terrain, x, y);
                 
                 // Check if position is on a road or near planned extensions
                 const lookResult = room.lookAt(x, y);
@@ -1042,30 +927,13 @@ const constructionManagerImpl = {
             existingSiteTypes[site.structureType] = (existingSiteTypes[site.structureType] || 0) + 1;
         }
         
-        // Create a map of existing structures for faster lookups
-        const structureMap = new Map();
-        const structures = room.find(FIND_STRUCTURES);
-        for (const structure of structures) {
-            const key = `${structure.pos.x},${structure.pos.y},${structure.structureType}`;
-            structureMap.set(key, true);
-        }
+        // Create maps of existing structures and sites for faster lookups
+        const structureMap = optimizer.createStructureMap(room);
+        const siteMap = optimizer.createSiteMap(room);
         
-        // Create a map of existing construction sites for faster lookups
-        const siteMap = new Map();
-        for (const site of existingSites) {
-            const key = `${site.pos.x},${site.pos.y},${site.structureType}`;
-            siteMap.set(key, true);
-        }
-        
-        // Define the order of structure creation based on our prioritization logic
-        if (!room.memory.construction.lastNonRoadTick) {
-            room.memory.construction.lastNonRoadTick = Game.time;
-        }
-        
-        // Track the last structure type we attempted to place
-        if (!room.memory.construction.lastStructureType) {
-            room.memory.construction.lastStructureType = 'containers';
-        }
+        // Initialize tracking for construction planning
+        room.memory.construction.lastNonRoadTick = room.memory.construction.lastNonRoadTick || Game.time;
+        room.memory.construction.lastStructureType = room.memory.construction.lastStructureType || 'containers';
         
         // Initialize tracking for sites placed by type
         let sitesPlaced = 0;
@@ -1291,8 +1159,10 @@ const constructionManagerImpl = {
         // Store the plan in room memory
         room.memory.roomPlan = plan;
         
+        // Initialize construction memory if needed
+        this._initializeRoomMemory(room);
+        
         // Mark all structure types as planned
-        room.memory.construction = room.memory.construction || {};
         room.memory.construction.planned = true;
         room.memory.construction.lastRCL = room.controller.level;
         room.memory.construction.lastUpdate = Game.time;
@@ -1444,9 +1314,7 @@ const constructionManagerImpl = {
         if (!room.memory.construction) return;
         
         // Track the last RCL we planned for
-        if (!room.memory.construction.lastRCL) {
-            room.memory.construction.lastRCL = room.controller.level;
-        }
+        room.memory.construction.lastRCL = room.memory.construction.lastRCL || room.controller.level;
         
         // If RCL has increased, update construction plans
         if (room.controller.level > room.memory.construction.lastRCL) {
@@ -1507,33 +1375,27 @@ const constructionManagerImpl = {
      */
     syncStructureCounts: function(room) {
         // Only run this check occasionally to save CPU
-        if (Game.time % 500 !== 0 && !room.memory._forceSync) return; // Increased from 200 to 500
-        if (room.memory._forceSync) delete room.memory._forceSync;
+        const forceSync = room.memory._forceSync;
+        if (!forceSync && Game.time % 500 !== 0) return; // Increased from 200 to 500
+        if (forceSync) delete room.memory._forceSync;
         
         // Skip if CPU is too high
         if (Game.cpu.getUsed() > Game.cpu.limit * 0.7) return;
         
-        if (!room.memory.construction) {
-            room.memory.construction = {};
-        }
+        // Initialize construction memory if needed
+        this._initializeRoomMemory(room);
         
         // Use cached structure data
         const structuresByType = optimizer.getCachedStructuresByType(room);
         
         // Update extension count
         const extensions = structuresByType[STRUCTURE_EXTENSION] || [];
-        if (!room.memory.construction.extensions) {
-            room.memory.construction.extensions = { planned: true, count: 0 };
-        }
         if (room.memory.construction.extensions.count !== extensions.length) {
             room.memory.construction.extensions.count = extensions.length;
         }
         
         // Update tower count
         const towers = structuresByType[STRUCTURE_TOWER] || [];
-        if (!room.memory.construction.towers) {
-            room.memory.construction.towers = { planned: true, count: 0 };
-        }
         if (room.memory.construction.towers.count !== towers.length) {
             room.memory.construction.towers.count = towers.length;
         }
@@ -1552,8 +1414,9 @@ const constructionManagerImpl = {
         if (!room.memory.roomPlan) return;
         
         // Only run this check very occasionally to save CPU
-        if (Game.time % 2000 !== 0 && !room.memory._forcePlanCheck) return; // Increased from 1000 to 2000
-        if (room.memory._forcePlanCheck) delete room.memory._forcePlanCheck;
+        const forcePlanCheck = room.memory._forcePlanCheck;
+        if (!forcePlanCheck && Game.time % 2000 !== 0) return; // Increased from 1000 to 2000
+        if (forcePlanCheck) delete room.memory._forcePlanCheck;
         
         // Skip if CPU is too high
         if (Game.cpu.getUsed() > Game.cpu.limit * 0.6) return;
@@ -1566,17 +1429,7 @@ const constructionManagerImpl = {
         const structuresByType = optimizer.getCachedStructuresByType(room);
         
         // Create position maps for planned structures (only for types we have)
-        const plannedPositions = {};
-        const relevantTypes = Object.keys(structuresByType);
-        
-        for (const structureType of relevantTypes) {
-            if (rclPlan.structures[structureType]) {
-                plannedPositions[structureType] = new Set();
-                for (const pos of rclPlan.structures[structureType]) {
-                    plannedPositions[structureType].add(`${pos.x},${pos.y}`);
-                }
-            }
-        }
+        const plannedPositions = this._createPlannedPositionsMap(rclPlan, Object.keys(structuresByType));
         
         // Check for misaligned structures
         let misalignedCount = 0;
@@ -1616,6 +1469,35 @@ const constructionManagerImpl = {
     },
     
     /**
+     * Initialize room memory structures for construction
+     * @private
+     * @param {Room} room - The room to initialize memory for
+     */
+    _initializeRoomMemory: function(room) {
+        if (!room.memory) {
+            room.memory = {};
+        }
+        
+        if (!room.memory.construction) {
+            room.memory.construction = {
+                roads: { planned: false },
+                extensions: { planned: false, count: 0 },
+                containers: { planned: false },
+                storage: { planned: false },
+                towers: { planned: false, count: 0 },
+                lastUpdate: 0
+            };
+        } else {
+            // Ensure all required properties exist
+            if (!room.memory.construction.roads) room.memory.construction.roads = { planned: false };
+            if (!room.memory.construction.extensions) room.memory.construction.extensions = { planned: false, count: 0 };
+            if (!room.memory.construction.containers) room.memory.construction.containers = { planned: false };
+            if (!room.memory.construction.storage) room.memory.construction.storage = { planned: false };
+            if (!room.memory.construction.towers) room.memory.construction.towers = { planned: false, count: 0 };
+        }
+    },
+    
+    /**
      * Get cached structure data by type
      * @private
      * @param {Room} room - The room to get structures for
@@ -1638,6 +1520,17 @@ const constructionManagerImpl = {
     },
     
     /**
+     * Get structure priority order based on RCL and room needs
+     * @private
+     * @param {Room} room - The room to check
+     * @param {Object} structuresByType - Existing structures grouped by type
+     * @returns {Array} - Array of structure types in priority order
+     */
+    _getStructurePriorityOrder: function(room, structuresByType) {
+        return helpers.getStructurePriorityOrder(room, structuresByType);
+    },
+    
+    /**
      * Update the construction site count in room memory
      * @param {Room} room - The room to update
      */
@@ -1650,16 +1543,7 @@ const constructionManagerImpl = {
         room.memory.constructionSiteIds = siteCache.ids;
         
         // Initialize construction memory if needed
-        if (!room.memory.construction) {
-            room.memory.construction = {
-                roads: { planned: false },
-                extensions: { planned: false, count: 0 },
-                containers: { planned: false },
-                storage: { planned: false },
-                towers: { planned: false, count: 0 },
-                lastUpdate: 0
-            };
-        }
+        this._initializeRoomMemory(room);
         
         // Check if we need to create more sites
         // Be more aggressive at lower RCLs
@@ -1731,80 +1615,8 @@ const constructionManagerImpl = {
         const structureMap = optimizer.createStructureMap(room);
         const siteMap = optimizer.createSiteMap(room);
         
-        // Define priority order for structure types
-        // Prioritize critical infrastructure first
-        let structurePriority;
-        
-        // Different priorities based on RCL
-        if (room.controller.level <= 2) {
-            // RCL 1-2: Focus on containers, extensions, then roads
-            structurePriority = [
-                STRUCTURE_SPAWN,
-                STRUCTURE_CONTAINER, // Containers first for early resource collection
-                STRUCTURE_EXTENSION, // Extensions for more energy capacity
-                STRUCTURE_ROAD,      // Roads last
-                STRUCTURE_TOWER,
-                STRUCTURE_STORAGE,
-                STRUCTURE_LINK,
-                STRUCTURE_TERMINAL,
-                STRUCTURE_LAB,
-                STRUCTURE_FACTORY,
-                STRUCTURE_OBSERVER,
-                STRUCTURE_POWER_SPAWN,
-                STRUCTURE_NUKER
-            ];
-        } else if (room.controller.level <= 4) {
-            // RCL 3-4: Focus on towers, extensions, containers, then roads
-            structurePriority = [
-                STRUCTURE_SPAWN,
-                STRUCTURE_TOWER,     // Towers for defense
-                STRUCTURE_EXTENSION, // Extensions for more energy
-                STRUCTURE_CONTAINER, // Containers for resource collection
-                STRUCTURE_STORAGE,   // Storage at RCL 4
-                STRUCTURE_ROAD,      // Roads last
-                STRUCTURE_LINK,
-                STRUCTURE_TERMINAL,
-                STRUCTURE_LAB,
-                STRUCTURE_FACTORY,
-                STRUCTURE_OBSERVER,
-                STRUCTURE_POWER_SPAWN,
-                STRUCTURE_NUKER
-            ];
-        } else {
-            // RCL 5+: Standard priority
-            structurePriority = [
-                STRUCTURE_SPAWN,
-                STRUCTURE_EXTENSION,
-                STRUCTURE_TOWER,
-                STRUCTURE_STORAGE,
-                STRUCTURE_LINK,
-                STRUCTURE_TERMINAL,
-                STRUCTURE_CONTAINER,
-                STRUCTURE_LAB,
-                STRUCTURE_FACTORY,
-                STRUCTURE_OBSERVER,
-                STRUCTURE_ROAD,
-                STRUCTURE_POWER_SPAWN,
-                STRUCTURE_NUKER
-            ];
-        }
-        
-        // Further adjust priority based on specific needs
-        if (room.controller.level <= 3) {
-            // Early game: check if we need more extensions or containers
-            const extensionCount = (structuresByType[STRUCTURE_EXTENSION] || []).length;
-            const containerCount = (structuresByType[STRUCTURE_CONTAINER] || []).length;
-            
-            // If we have enough containers but few extensions, prioritize extensions
-            if (containerCount >= 2 && extensionCount < 5 && room.controller.level >= 2) {
-                // Move extensions up in priority
-                const extensionIndex = structurePriority.indexOf(STRUCTURE_EXTENSION);
-                if (extensionIndex > 0) {
-                    structurePriority.splice(extensionIndex, 1);
-                    structurePriority.unshift(STRUCTURE_EXTENSION);
-                }
-            }
-        }
+        // Get structure priority order based on RCL and room needs
+        const structurePriority = this._getStructurePriorityOrder(room, structuresByType);
         
         let sitesPlaced = 0;
         
@@ -2040,15 +1852,9 @@ const constructionManagerImpl = {
             siteMap.set(key, true);
         }
         
-        // Define priority order for structure types
-        const structurePriority = [
-            STRUCTURE_SPAWN,
-            STRUCTURE_EXTENSION,
-            STRUCTURE_CONTAINER,
-            STRUCTURE_TOWER,
-            STRUCTURE_STORAGE,
-            STRUCTURE_ROAD
-        ];
+        // Get structure priority order based on RCL and room needs
+        const structuresByType = optimizer.getCachedStructuresByType(room);
+        const structurePriority = this._getStructurePriorityOrder(room, structuresByType);
         
         let sitesCreated = 0;
         
@@ -2169,13 +1975,7 @@ const constructionManagerImpl = {
             });
             
             // Create a map of planned positions for each structure type
-            const plannedPositions = {};
-            for (const structureType in rclPlan.structures) {
-                plannedPositions[structureType] = new Set();
-                for (const pos of rclPlan.structures[structureType]) {
-                    plannedPositions[structureType].add(`${pos.x},${pos.y}`);
-                }
-            }
+            const plannedPositions = this._createPlannedPositionsMap(rclPlan);
             
             // Find structures that are not in the plan
             for (const structure of structures) {

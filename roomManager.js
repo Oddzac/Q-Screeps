@@ -1,6 +1,9 @@
 /**
  * Room Manager - Centralized room intelligence with CPU optimization
  */
+const utils = require('utils');
+const helpers = require('helpers');
+
 const roomManager = {
     // Cache for room data to avoid memory reads
     cache: {},
@@ -10,8 +13,6 @@ const roomManager = {
      * @param {Room} room - The room to analyze
      */
     updateRoomData: function(room) {
-        const utils = require('utils');
-        
         try {
             // Skip if we've already processed this room this tick
             const roomTickKey = `${room.name}_processed`;
@@ -162,8 +163,6 @@ const roomManager = {
      * @param {Room} room - The room to refresh data for
      */
     refreshConstructionSites: function(room) {
-        const utils = require('utils');
-        
         // Find and cache construction sites
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         this.cache[room.name].constructionSites = sites.length;
@@ -205,8 +204,6 @@ const roomManager = {
      * @param {Room} room - The room to update
      */
     performFullUpdate: function(room) {
-        const utils = require('utils');
-        
         // Find and cache sources - use cached find to reduce CPU
         const sources = utils.cachedFind(room, FIND_SOURCES, {}, 500); // Sources don't change often
         
@@ -510,8 +507,8 @@ const roomManager = {
             if (logRelease || (Game.time % 100 === 0 && oldCount > 0)) {
                 const source = Game.getObjectById(sourceId);
                 const energyInfo = source ? `${source.energy}/${source.energyCapacity} energy` : 'unknown energy';
-                console.log(`Released harvester from source ${sourceId} in room ${roomName} ` +
-                            `(${room.memory.sources[sourceId].assignedHarvesters}/${room.memory.sources[sourceId].availableSpots} harvesters, ${energyInfo})`);
+                helpers.logError(`source_release_${sourceId}`, `Released harvester from source ${sourceId} in room ${roomName} ` +
+                            `(${room.memory.sources[sourceId].assignedHarvesters}/${room.memory.sources[sourceId].availableSpots} harvesters, ${energyInfo})`, 100);
             }
         }
     },
