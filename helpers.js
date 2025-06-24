@@ -138,5 +138,23 @@ module.exports = {
         }
         
         return true;
+    },
+    
+    /**
+     * Track errors to prevent log spam
+     * @param {string} key - Error identifier
+     * @param {string} message - Error message
+     * @param {number} interval - How often to log this error (in ticks)
+     */
+    logError: function(key, message, interval = 100) {
+        if (!global.errorLog) global.errorLog = {};
+        
+        const now = Game.time;
+        const lastLogged = global.errorLog[key] || 0;
+        
+        if (now - lastLogged >= interval) {
+            console.log(`ERROR [${key}]: ${message}`);
+            global.errorLog[key] = now;
+        }
     }
 };

@@ -128,6 +128,9 @@ const spawnManager = {
                         // Check if we should delay spawning to accumulate more energy
                         const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
                         
+                        // Get optimal counts from roomManager
+                        const optimalCounts = roomManager.analyzeRoomNeeds(room);
+                        
                         // Calculate role urgency (0-1) based on deficit percentage
                         const roleUrgency = this.calculateRoleUrgency(room, neededRole, counts, optimalCounts);
                         
@@ -401,7 +404,6 @@ const spawnManager = {
         // Calculate the best body based on available energy and role urgency
         const body = this.calculateBody(role, energy, urgency);
         
-        const urgency = this.calculateRoleUrgency(spawn.room, role, counts, optimalCounts);
         console.log(`Attempting to spawn ${role} with energy ${energy}, urgency: ${(urgency*100).toFixed(0)}%, body: [${body.join(',')}]`);
         
         if (body.length === 0) {
@@ -614,10 +616,8 @@ const spawnManager = {
             body = body.slice(0, 50);
         }
         
-        // Verify we don't exceed energy limit
-        const actualCost = body.reduce((cost, part) => {
-            return cost + (part === WORK ? 100 : 50);
-        }, 0);
+        // Use the calculateBodyCost function to check energy limit
+        const actualCost = this.calculateBodyCost(body);
         
         if (actualCost > energy) {
             console.log(`Warning: Body cost ${actualCost} exceeds available energy ${energy}`);
