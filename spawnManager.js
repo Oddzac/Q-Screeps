@@ -650,9 +650,8 @@ const spawnManager = {
             }
         }
         
-        // Ensure we don't exceed energy limit
-        const actualCost = this.calculateBodyCost(body);
-        if (actualCost > energy) {
+        // Check if we need to recalculate the body to fit energy limit
+        if (this.calculateBodyCost(body) > energy) {
             // Recalculate with exact energy limit
             body = this.recalculateBodyForEnergy(role, energy, body);
         }
