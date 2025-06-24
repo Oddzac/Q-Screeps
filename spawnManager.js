@@ -508,6 +508,9 @@ const spawnManager = {
         // Minimum viable creep costs 200 energy (1 WORK, 1 CARRY, 1 MOVE)
         if (energy < 200) return [];
         
+        // Log the energy available for debugging
+        console.log(`Calculating body for ${role} with ${energy} energy and urgency ${(urgency*100).toFixed(0)}%`);
+        
         let body = [];
         
         switch (role) {
@@ -676,9 +679,36 @@ const spawnManager = {
         }
         
         // Check if we need to recalculate the body to fit energy limit
-        if (this.calculateBodyCost(body) > energy) {
+        const bodyCost = this.calculateBodyCost(body);
+        if (bodyCost > energy) {
+            console.log(`Body cost ${bodyCost} exceeds energy ${energy}, recalculating`);
             // Recalculate with exact energy limit
             body = this.recalculateBodyForEnergy(role, energy, body);
+        }
+        
+        // Verify we're not spawning a minimal creep when we have energy for more
+        if (body.length <= 3 && energy >= 300) {
+            console.log(`WARNING: Calculated minimal body despite having ${energy} energy. Forcing better body.`);
+            // Force a better body based on role
+            if (role === 'harvester' && energy >= 250) {
+                const workParts = Math.min(Math.floor((energy - 50) / 100), 5); // Up to 5 WORK parts
+                body = [];
+                for (let i = 0; i < workParts; i++) body.push(WORK);
+                body.push(CARRY);
+                body.push(MOVE);
+            } else if (role === 'hauler' && energy >= 300) {
+                const pairs = Math.floor(energy / 100); // CARRY+MOVE pairs
+                body = [];
+                for (let i = 0; i < pairs; i++) body.push(CARRY);
+                for (let i = 0; i < pairs; i++) body.push(MOVE);
+            } else if (energy >= 300) {
+                // For other roles, use balanced body
+                const parts = Math.floor(energy / 200); // WORK+CARRY+MOVE sets
+                body = [];
+                for (let i = 0; i < parts; i++) body.push(WORK);
+                for (let i = 0; i < parts; i++) body.push(CARRY);
+                for (let i = 0; i < parts; i++) body.push(MOVE);
+            }
         }
         
         // Cache the result
@@ -764,6 +794,44 @@ const spawnManager = {
      * @returns {string[]} - Adjusted body that fits within energy limit
      */
     recalculateBodyForEnergy: function(role, energy, originalBody) {
+        console.log(`Recalculating body for ${role} with ${energy} energy`);
+        
+        // If energy is sufficient for a decent body, just create a new one from scratch
+        if (energy >= 300) {
+            // For harvesters, prioritize WORK parts
+            if (role === 'harvester') {
+                // Try to get as many WORK parts as possible with some CARRY and MOVE
+                const workParts = Math.min(Math.floor((energy - 100) / 100), 5); // Up to 5 WORK parts
+                let body = [];
+                for (let i = 0; i < workParts; i++) body.push(WORK);
+                body.push(CARRY);
+                body.push(MOVE);
+                console.log(`Created new harvester body with ${workParts} WORK parts: [${body.join(',')}]`);
+                return body;
+            }
+            // For haulers, maximize CARRY with enough MOVE
+            else if (role === 'hauler') {
+                // Use 2:1 CARRY:MOVE ratio for efficiency
+                const sets = Math.floor(energy / 150); // 2 CARRY + 1 MOVE = 150 energy
+                let body = [];
+                for (let i = 0; i < sets * 2; i++) body.push(CARRY);
+                for (let i = 0; i < sets; i++) body.push(MOVE);
+                console.log(`Created new hauler body with ${sets * 2} CARRY parts: [${body.join(',')}]`);
+                return body;
+            }
+            // For other roles, use balanced body
+            else {
+                const sets = Math.floor(energy / 200); // WORK+CARRY+MOVE sets
+                let body = [];
+                for (let i = 0; i < sets; i++) body.push(WORK);
+                for (let i = 0; i < sets; i++) body.push(CARRY);
+                for (let i = 0; i < sets; i++) body.push(MOVE);
+                console.log(`Created new balanced body with ${sets} sets: [${body.join(',')}]`);
+                return body;
+            }
+        }
+        
+        // For lower energy amounts, try to optimize the original body
         // Count parts by type
         const partCounts = {};
         for (const part of originalBody) {
@@ -842,6 +910,7 @@ const spawnManager = {
             }
         }
         
+        console.log(`Optimized body: [${newBody.join(',')}]`);
         return newBody;
     },
     
