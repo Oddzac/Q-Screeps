@@ -1,6 +1,6 @@
 /**
- * Recovery Manager - Handles adaptive recovery after pixel generation
- * Monitors CPU bucket recovery rate and adjusts operations accordingly
+ * Recovery Manager - Handles adaptive recovery during CPU crisis
+ * Only activates when bucket is continuously draining, not just after pixel generation
  */
 const recoveryManager = {
     // Track bucket history for recovery rate calculation
@@ -12,6 +12,10 @@ const recoveryManager = {
     recoveryStartBucket: 0,
     isRecovering: false,
     recoveryRate: 0, // Bucket points per tick
+    
+    // Consecutive ticks of bucket drain to trigger recovery
+    drainThreshold: 5,
+    drainCounter: 0,
     
     /**
      * Update recovery status based on current bucket
@@ -25,9 +29,17 @@ const recoveryManager = {
             this.bucketHistory.shift();
         }
         
-        // Detect pixel generation (sudden drop from 10000)
-        if (currentBucket < 9000 && global.previousBucket === 10000) {
-            this.startRecovery(currentBucket);
+        // Check for continuous bucket drain
+        if (global.previousBucket !== undefined && currentBucket < global.previousBucket) {
+            this.drainCounter++;
+            
+            // Only enter recovery if bucket is continuously draining AND below 5000
+            if (this.drainCounter >= this.drainThreshold && currentBucket < 5000 && !this.isRecovering) {
+                this.startRecovery(currentBucket);
+            }
+        } else {
+            // Reset drain counter if bucket is stable or increasing
+            this.drainCounter = 0;
         }
         
         // Store current bucket for next tick comparison
@@ -88,11 +100,13 @@ const recoveryManager = {
         const recoveryTime = Game.time - this.recoveryStartTime;
         
         // End recovery if bucket is high enough and stable
-        if ((currentBucket > 8000 && this.recoveryRate > 0) || 
-            (currentBucket > 5000 && recoveryTime > 200) || 
-            recoveryTime > 500) {
+        // More lenient exit conditions
+        if ((currentBucket > 5000 && this.recoveryRate > 0) || 
+            (currentBucket > 3000 && recoveryTime > 100) || 
+            recoveryTime > 300) {
             
             this.isRecovering = false;
+            this.drainCounter = 0; // Reset drain counter
             console.log(`✅ Recovery complete after ${recoveryTime} ticks. ` +
                       `Bucket: ${currentBucket}, final rate: ${this.recoveryRate.toFixed(2)}`);
         }
@@ -108,26 +122,25 @@ const recoveryManager = {
         
         const currentBucket = Game.cpu.bucket;
         
-        // Base factor on current bucket level with a more generous curve
-        // This makes the factor grow faster at lower bucket levels
-        let factor = Math.min(Math.pow(currentBucket / 10000, 0.7), 0.95);
+        // Much more generous curve - start with higher base factor
+        let factor = Math.min(Math.pow(currentBucket / 10000, 0.5), 0.98);
         
-        // Adjust based on recovery rate
-        if (this.recoveryRate > 10) {
+        // Adjust based on recovery rate - more lenient adjustments
+        if (this.recoveryRate > 5) {
             // Good recovery rate, be more lenient
+            factor += 0.15;
+        } else if (this.recoveryRate > 0) {
+            // Positive recovery rate
             factor += 0.1;
-        } else if (this.recoveryRate > 5) {
-            // Decent recovery rate
-            factor += 0.05;
         } else if (this.recoveryRate < 0) {
-            // Negative recovery rate, be more strict but not too harsh
-            factor *= 0.7;
+            // Negative recovery rate, be more strict but still not too harsh
+            factor *= 0.8;
         }
         
-        // Add a small bonus for time spent in recovery to prevent stalling
+        // Add a larger bonus for time spent in recovery to prevent stalling
         const recoveryTime = Game.time - this.recoveryStartTime;
-        if (recoveryTime > 50) {
-            factor += Math.min(0.1, recoveryTime / 1000); // Max 0.1 bonus after 1000 ticks
+        if (recoveryTime > 20) { // Kick in sooner
+            factor += Math.min(0.2, recoveryTime / 500); // Max 0.2 bonus after 500 ticks
         }
         
         // Log recovery factor calculation periodically
@@ -135,8 +148,8 @@ const recoveryManager = {
             console.log(`Recovery factor: ${factor.toFixed(2)}, bucket: ${currentBucket}, rate: ${this.recoveryRate.toFixed(2)}, time: ${recoveryTime}`);
         }
         
-        // Ensure factor is between 0.1 and 1.0
-        return Math.max(0.1, Math.min(factor, 1.0));
+        // Ensure factor is between 0.2 and 1.0 (higher minimum)
+        return Math.max(0.2, Math.min(factor, 1.0));
     },
     
     /**
@@ -156,23 +169,25 @@ const recoveryManager = {
         // Check if CPU usage is reasonable
         const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ?
                           global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 1.0;
-        const veryLowCpuUsage = avgCpuUsage < 1.0; // More reasonable threshold
+        const veryLowCpuUsage = avgCpuUsage < 2.0; // Much more lenient threshold
         
-        // For other priorities, use recovery factor and bucket level
+        // For other priorities, use recovery factor and bucket level - much more lenient thresholds
         let result;
         switch(priority) {
             case 'high':
-                result = factor > 0.2 || currentBucket > 800 || veryLowCpuUsage;
+                // Almost always run high priority tasks
+                result = factor > 0.1 || currentBucket > 500 || veryLowCpuUsage;
                 break;
             case 'medium':
-                // Be very lenient with medium priority to prevent room stalling
-                result = factor > 0.3 || currentBucket > 1000 || veryLowCpuUsage || avgCpuUsage < 1.5;
+                // Very lenient with medium priority to prevent room stalling
+                result = factor > 0.2 || currentBucket > 800 || veryLowCpuUsage || avgCpuUsage < 3.0;
                 break;
             case 'low':
-                result = factor > 0.5 || currentBucket > 3000 || (veryLowCpuUsage && currentBucket > 1500);
+                // More lenient with low priority
+                result = factor > 0.3 || currentBucket > 1500 || (veryLowCpuUsage && currentBucket > 1000);
                 break;
             default:
-                result = factor > 0.7;
+                result = factor > 0.5;
         }
         
         // Log decisions for medium priority periodically

@@ -46,12 +46,19 @@ const spawnManager = {
             const criticalCollapse = counts.harvester === 0 || 
                                     (counts.harvester > 0 && counts.hauler === 0);
             
-            // In emergency mode, only spawn critical creeps unless we're in collapse prevention
+            // In emergency mode, be more lenient with spawning
             if (global.emergencyMode && !criticalCollapse) {
-                if (global.emergencyMode.level === 'critical') return;
+                // Check CPU usage - if it's very low, allow spawning even in emergency mode
+                const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ?
+                                  global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 1.0;
+                const veryLowCpuUsage = avgCpuUsage < 2.0;
                 
-                // In high emergency, only spawn if we have very few creeps
-                if (counts.total > 5) return;
+                // In critical emergency, only spawn if CPU usage is very low
+                if (global.emergencyMode.level === 'critical' && !veryLowCpuUsage) return;
+                
+                // In high emergency, allow more creeps when CPU usage is low
+                const creepLimit = veryLowCpuUsage ? 10 : 5;
+                if (counts.total > creepLimit) return;
             }
             
             // Use the first available spawn
@@ -108,14 +115,22 @@ const spawnManager = {
                     room.memory.emergencyHaulerDelay = null;
                 }
                 
-                // Normal spawning - only if CPU conditions allow
-                if (utils.shouldExecute('medium')) {
+                // Check CPU usage for adaptive spawning behavior
+                const avgCpuUsage = global.cpuHistory && global.cpuHistory.length > 0 ?
+                                  global.cpuHistory.reduce((sum, val) => sum + val, 0) / global.cpuHistory.length : 1.0;
+                const veryLowCpuUsage = avgCpuUsage < 2.0;
+                
+                // Normal spawning - more lenient CPU conditions
+                if (utils.shouldExecute('medium') || veryLowCpuUsage) {
                     // Determine what role we need most
                     const neededRole = this.getNeededRole(room, counts);
                     if (neededRole) {
                         // Check if we should delay spawning to accumulate more energy
                         const energyRatio = room.energyAvailable / room.energyCapacityAvailable;
-                        const shouldDelay = !criticalCollapse && energyRatio < 0.8;
+                        
+                        // Be more aggressive with spawning when CPU usage is low
+                        const energyThreshold = veryLowCpuUsage ? 0.6 : 0.8;
+                        const shouldDelay = !criticalCollapse && energyRatio < energyThreshold;
                         
                         // Initialize or update spawn delay tracking
                         if (!room.memory.spawnDelay) {
@@ -133,14 +148,17 @@ const spawnManager = {
                             };
                         }
                         
-                        // Check if we should spawn now
-                        const delayElapsed = Game.time - room.memory.spawnDelay.startTick >= 30;
+                        // Check if we should spawn now - shorter delay when CPU usage is low
+                        const maxDelay = veryLowCpuUsage ? 15 : 30; // Shorter delay when CPU usage is low
+                        const delayElapsed = Game.time - room.memory.spawnDelay.startTick >= maxDelay;
                         const spawnNow = !shouldDelay || delayElapsed || criticalCollapse;
                         
                         if (spawnNow) {
                             // In emergency mode, spawn smaller creeps to save energy
+                            // But be more aggressive when CPU usage is low
+                            const energyFactor = veryLowCpuUsage ? 0.9 : 0.7;
                             const energyToUse = global.emergencyMode ? 
-                                Math.min(room.energyAvailable, room.energyCapacityAvailable * 0.7) : 
+                                Math.min(room.energyAvailable, room.energyCapacityAvailable * energyFactor) : 
                                 room.energyAvailable;
                                 
                             // Spawn the appropriate creep
@@ -150,7 +168,7 @@ const spawnManager = {
                             room.memory.spawnDelay = null;
                         } else if (Game.time % 10 === 0) {
                             // Log that we're waiting for more energy
-                            console.log(`Room ${room.name} delaying spawn of ${neededRole}: waiting for energy (${Math.round(energyRatio * 100)}% of capacity, ${30 - (Game.time - room.memory.spawnDelay.startTick)} ticks remaining)`);
+                            console.log(`Room ${room.name} delaying spawn of ${neededRole}: waiting for energy (${Math.round(energyRatio * 100)}% of capacity, ${maxDelay - (Game.time - room.memory.spawnDelay.startTick)} ticks remaining)`);
                         }
                     } else if (Game.time % 50 === 0) {
                         console.log(`Room ${room.name} spawn blocked: no needed role determined`);
@@ -158,7 +176,7 @@ const spawnManager = {
                         room.memory.spawnDelay = null;
                     }
                 } else if (Game.time % 50 === 0) {
-                    console.log(`Room ${room.name} spawn blocked: CPU conditions (shouldExecute medium = false)`);
+                    console.log(`Room ${room.name} spawn blocked: CPU conditions (shouldExecute medium = false and CPU usage not low enough)`);
                 }
             }
         } catch (error) {
