@@ -427,7 +427,27 @@ const spawnManager = {
         }
         
         // Calculate the best body based on available energy and role urgency
-        const body = this.calculateBody(role, energy, urgency);
+        let body = this.calculateBody(role, energy, urgency);
+        
+        // Double-check the body cost doesn't exceed available energy
+        const bodyCost = this.calculateBodyCost(body);
+        if (bodyCost > energy) {
+            console.log(`ERROR: Body cost ${bodyCost} exceeds available energy ${energy}, forcing recalculation`);
+            // Force a simple body that we know will fit
+            if (role === 'hauler') {
+                const pairs = Math.floor(energy / 100);
+                body = [];
+                for (let i = 0; i < pairs; i++) body.push(CARRY);
+                for (let i = 0; i < pairs; i++) body.push(MOVE);
+            } else {
+                const workParts = Math.floor((energy - 100) / 100);
+                body = [];
+                for (let i = 0; i < workParts; i++) body.push(WORK);
+                body.push(CARRY);
+                body.push(MOVE);
+            }
+            console.log(`Forced safe body: [${body.join(',')}], cost: ${this.calculateBodyCost(body)}`);
+        }
         
         console.log(`Attempting to spawn ${role} with energy ${energy}, urgency: ${(urgency*100).toFixed(0)}%, body: [${body.join(',')}]`);
         
@@ -772,7 +792,16 @@ const spawnManager = {
      * @returns {number} - Total energy cost
      */
     calculateBodyCost: function(body) {
-        return body.reduce((cost, part) => {
+        if (!body || body.length === 0) return 0;
+        
+        // Count parts by type for logging
+        const partCounts = {};
+        for (const part of body) {
+            partCounts[part] = (partCounts[part] || 0) + 1;
+        }
+        
+        // Calculate total cost
+        const totalCost = body.reduce((cost, part) => {
             switch(part) {
                 case WORK: return cost + 100;
                 case CARRY: case MOVE: return cost + 50;
@@ -784,6 +813,23 @@ const spawnManager = {
                 default: return cost;
             }
         }, 0);
+        
+        // Log detailed cost breakdown for debugging
+        const partDetails = Object.entries(partCounts)
+            .map(([part, count]) => {
+                const partCost = part === WORK ? 100 : 
+                               (part === CARRY || part === MOVE) ? 50 : 
+                               part === ATTACK ? 80 : 
+                               part === RANGED_ATTACK ? 150 : 
+                               part === HEAL ? 250 : 
+                               part === CLAIM ? 600 : 
+                               part === TOUGH ? 10 : 0;
+                return `${count}×${part}(${partCost})`;
+            })
+            .join(', ');
+        
+        console.log(`Body cost calculation: [${body.join(',')}] = ${totalCost} (${partDetails})`);
+        return totalCost;
     },
     
     /**
@@ -800,13 +846,35 @@ const spawnManager = {
         if (energy >= 300) {
             // For harvesters, prioritize WORK parts
             if (role === 'harvester') {
-                // Try to get as many WORK parts as possible with some CARRY and MOVE
-                const workParts = Math.min(Math.floor((energy - 100) / 100), 5); // Up to 5 WORK parts
+                // Calculate how many WORK parts we can afford with 1 CARRY and 1 MOVE
+                // WORK = 100, CARRY = 50, MOVE = 50, so we need to reserve 100 energy for CARRY+MOVE
+                const workParts = Math.floor((energy - 100) / 100);
+                
+                // Ensure we have at least 1 WORK part and don't exceed 5 WORK parts
+                const finalWorkParts = Math.max(1, Math.min(workParts, 5));
+                
+                // Calculate total cost to verify
+                const totalCost = (finalWorkParts * 100) + 100; // WORK parts + (CARRY+MOVE)
+                
+                // Double-check we're not exceeding energy
+                if (totalCost > energy) {
+                    console.log(`WARNING: Calculated body cost ${totalCost} exceeds energy ${energy}, reducing parts`);
+                    // Reduce WORK parts if needed
+                    const adjustedWorkParts = Math.floor((energy - 100) / 100);
+                    let body = [];
+                    for (let i = 0; i < adjustedWorkParts; i++) body.push(WORK);
+                    body.push(CARRY);
+                    body.push(MOVE);
+                    console.log(`Adjusted harvester body: [${body.join(',')}], cost: ${(adjustedWorkParts * 100) + 100}`);
+                    return body;
+                }
+                
+                // Create the body
                 let body = [];
-                for (let i = 0; i < workParts; i++) body.push(WORK);
+                for (let i = 0; i < finalWorkParts; i++) body.push(WORK);
                 body.push(CARRY);
                 body.push(MOVE);
-                console.log(`Created new harvester body with ${workParts} WORK parts: [${body.join(',')}]`);
+                console.log(`Created harvester body with ${finalWorkParts} WORK parts: [${body.join(',')}], cost: ${totalCost}`);
                 return body;
             }
             // For haulers, maximize CARRY with enough MOVE
