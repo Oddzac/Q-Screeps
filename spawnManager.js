@@ -73,7 +73,26 @@ const spawnManager = {
                 // Emergency recovery - if no harvesters, spawn one immediately (no delay)
                 if (counts.harvester === 0) {
                     console.log(`Room ${room.name} emergency spawning harvester (0 harvesters)`);
-                    this.spawnCreep(spawn, 'harvester', room.energyAvailable);
+                    
+                    // For emergency harvesters, use at least 50% of capacity if available
+                    // This ensures we get a decent sized harvester even in emergency
+                    const minEnergy = Math.min(room.energyCapacityAvailable * 0.5, room.energyAvailable);
+                    const energyToUse = Math.max(250, minEnergy); // At least try for a 2W+1C+1M harvester
+                    
+                    // Wait for energy if we're close to having enough for a better harvester
+                    // but only if we have at least one harvester already
+                    const shouldWait = room.energyAvailable < energyToUse && 
+                                      room.energyAvailable > 200 && 
+                                      room.energyAvailable / energyToUse > 0.8;
+                    
+                    if (shouldWait) {
+                        console.log(`Waiting for more energy for emergency harvester: ${room.energyAvailable}/${energyToUse}`);
+                        return;
+                    }
+                    
+                    // Spawn with whatever energy we have, but at least 200
+                    this.spawnCreep(spawn, 'harvester', Math.max(200, room.energyAvailable));
+                    
                     // Clear any spawn delay data
                     room.memory.spawnDelay = null;
                     return;
@@ -198,12 +217,18 @@ const spawnManager = {
         } catch (error) {
             console.log(`Error in spawnManager.run for room ${room.name}: ${error}`);
             
-            // Emergency recovery - try to spawn a basic harvester if we have any spawn available
-            const spawn = room.find(FIND_MY_SPAWNS)[0];
-            if (spawn && !spawn.spawning && room.energyAvailable >= 200) {
-                spawn.spawnCreep([WORK, CARRY, MOVE], 'emergency' + Game.time, {
-                    memory: { role: 'harvester', homeRoom: room.name }
-                });
+            // Only spawn emergency harvester if we have ZERO harvesters
+            const counts = roomManager.getRoomData(room.name, 'creepCounts') || {};
+            const harvesterCount = counts.harvester || 0;
+            
+            if (harvesterCount === 0) {
+                console.log(`CRITICAL: No harvesters in room ${room.name}, spawning emergency harvester`);
+                const spawn = room.find(FIND_MY_SPAWNS)[0];
+                if (spawn && !spawn.spawning && room.energyAvailable >= 200) {
+                    spawn.spawnCreep([WORK, CARRY, MOVE], 'emergency' + Game.time, {
+                        memory: { role: 'harvester', homeRoom: room.name }
+                    });
+                }
             }
         }
     },
