@@ -429,17 +429,57 @@ const construction = {
      * @returns {boolean} - Success or failure
      */
     generateRoomPlan: function(room) {
-        // This is a placeholder - implement based on your needs
+        const roomPlanner = require('roomPlanner');
+        
+        // Generate the complete room plan
+        const plan = roomPlanner.generateRoomPlan(room);
+        
+        if (!plan) {
+            console.log(`Failed to generate room plan for ${room.name}`);
+            return false;
+        }
+        
+        // Store the plan in room memory
+        room.memory.roomPlan = plan;
+        
+        // Initialize construction memory if needed
+        this._initializeRoomMemory(room);
+        
+        // Mark all structure types as planned
+        room.memory.construction.planned = true;
+        room.memory.construction.lastRCL = room.controller.level;
+        room.memory.construction.lastUpdate = Game.time;
+        
+        console.log(`Generated complete room plan for ${room.name} from RCL 1 to 8`);
         return true;
     },
     
     /**
      * Visualize the room plan
      * @param {Room} room - The room to visualize
-     * @param {number} rcl - RCL to visualize (0 for all)
+     * @param {number} rcl - RCL level to visualize (0 for all levels)
      */
     visualizeRoomPlan: function(room, rcl = 0) {
-        // This is a placeholder - implement based on your needs
+        const roomPlanner = require('roomPlanner');
+        
+        if (!room.memory.roomPlan) {
+            console.log(`No room plan exists for ${room.name}. Generate a plan first.`);
+            return false;
+        }
+        
+        // Output next construction sites to console
+        const nextSites = this.getNextConstructionSites(room, 10);
+        if (nextSites.length > 0) {
+            console.log(`Next planned construction sites for ${room.name}:`);
+            for (const site of nextSites) {
+                console.log(`- ${site.type} at (${site.x},${site.y})`);
+            }
+        } else {
+            console.log(`No pending construction sites found in ${room.name}.`);
+        }
+        
+        roomPlanner.visualize(room, room.memory.roomPlan, rcl);
+        return true;
     },
     
     /**
@@ -696,6 +736,28 @@ const construction = {
         }
         
         return bestPos;
+    },
+    
+    /**
+     * Initialize room memory for construction
+     * @param {Room} room - The room to initialize
+     * @private
+     */
+    _initializeRoomMemory: function(room) {
+        if (!room.memory) {
+            room.memory = {};
+        }
+        
+        if (!room.memory.construction) {
+            room.memory.construction = {
+                roads: { planned: false },
+                extensions: { planned: false, count: 0 },
+                containers: { planned: false },
+                storage: { planned: false },
+                towers: { planned: false, count: 0 },
+                lastUpdate: 0
+            };
+        }
     },
     
     // Include the optimizer as a sub-module
