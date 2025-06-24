@@ -191,51 +191,86 @@ const construction = {
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         if (sites.length >= 10) return 0; // Don't create more if we already have many
         
-        // Create roads first
-        if (plan.roads && sitesCreated < maxSites) {
-            for (const pos of plan.roads) {
-                if (sitesCreated >= maxSites) break;
-                
-                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
-                if (result === OK) sitesCreated++;
-            }
+        // Get the plan for the current RCL
+        if (!plan.rcl || !plan.rcl[currentRCL] || !plan.rcl[currentRCL].structures) {
+            console.log(`No plan exists for RCL ${currentRCL} in room ${room.name}`);
+            return 0;
         }
         
-        // Create extensions if RCL 2+
-        if (currentRCL >= 2 && plan.extensions && sitesCreated < maxSites) {
-            for (const pos of plan.extensions) {
-                if (sitesCreated >= maxSites) break;
-                
-                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
-                if (result === OK) sitesCreated++;
-            }
+        const rclPlan = plan.rcl[currentRCL].structures;
+        console.log(`Creating construction sites for RCL ${currentRCL} in room ${room.name}`);
+        
+        // Create structures in priority order
+        const structurePriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_TOWER,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_STORAGE,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_ROAD
+        ];
+        
+        // Create a map of existing structures and sites for faster lookups
+        const existingStructures = new Map();
+        const existingSites = new Map();
+        
+        // Get all structures in the room
+        const allStructures = room.find(FIND_STRUCTURES);
+        for (const structure of allStructures) {
+            const key = `${structure.pos.x},${structure.pos.y},${structure.structureType}`;
+            existingStructures.set(key, true);
         }
         
-        // Create containers
-        if (plan.containers && sitesCreated < maxSites) {
-            for (const pos of plan.containers) {
-                if (sitesCreated >= maxSites) break;
-                
-                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
-                if (result === OK) sitesCreated++;
-            }
+        // Get all construction sites in the room
+        const allSites = room.find(FIND_CONSTRUCTION_SITES);
+        for (const site of allSites) {
+            const key = `${site.pos.x},${site.pos.y},${site.structureType}`;
+            existingSites.set(key, true);
         }
         
-        // Create towers if RCL 3+
-        if (currentRCL >= 3 && plan.towers && sitesCreated < maxSites) {
-            for (const pos of plan.towers) {
+        // Process each structure type in priority order
+        for (const structureType of structurePriority) {
+            if (sitesCreated >= maxSites) break;
+            
+            // Skip if this structure type isn't in the plan
+            if (!rclPlan[structureType]) continue;
+            
+            // Skip if we can't build this structure type at current RCL
+            const maxAllowed = CONTROLLER_STRUCTURES[structureType][currentRCL] || 0;
+            if (maxAllowed === 0) continue;
+            
+            // Count existing structures of this type
+            const existingCount = room.find(FIND_STRUCTURES, {
+                filter: s => s.structureType === structureType
+            }).length;
+            
+            // Count existing construction sites of this type
+            const siteCount = room.find(FIND_CONSTRUCTION_SITES, {
+                filter: s => s.structureType === structureType
+            }).length;
+            
+            // Skip if we've reached the limit for this structure type
+            if (existingCount + siteCount >= maxAllowed) continue;
+            
+            // Create construction sites for this structure type
+            for (const pos of rclPlan[structureType]) {
                 if (sitesCreated >= maxSites) break;
                 
-                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_TOWER);
-                if (result === OK) sitesCreated++;
+                // Skip if there's already a structure or site here
+                const key = `${pos.x},${pos.y},${structureType}`;
+                if (existingStructures.has(key) || existingSites.has(key)) continue;
+                
+                // Create the construction site
+                const result = room.createConstructionSite(pos.x, pos.y, structureType);
+                
+                if (result === OK) {
+                    sitesCreated++;
+                    console.log(`Created construction site for ${structureType} at (${pos.x},${pos.y})`);
+                    existingSites.set(key, true);
+                } else if (result !== ERR_FULL) {
+                    console.log(`Failed to create construction site for ${structureType} at (${pos.x},${pos.y}): ${result}`);
+                }
             }
-        }
-        
-        // Create storage if RCL 4+
-        if (currentRCL >= 4 && plan.storage && sitesCreated < maxSites) {
-            const pos = plan.storage;
-            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
-            if (result === OK) sitesCreated++;
         }
         
         return sitesCreated;

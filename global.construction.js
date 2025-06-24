@@ -42,32 +42,34 @@ module.exports = {
         return construction.checkPlanningStatus(room);
     },
     
-    forceConstruction: function(roomName, count = 1) {
+    forceConstruction: function(roomName, count = 5) {
         const room = Game.rooms[roomName];
         if (!room) return `No visibility in room ${roomName}`;
-        
-        if (!room.memory.construction || !room.memory.construction.roads || !room.memory.construction.roads.planned) {
-            console.log(`Room ${roomName} has no construction plans. Planning roads first...`);
-            construction.planRoads(room);
-            return `Created road plans for room ${roomName}. Run this command again to create sites.`;
-        }
         
         if (room.memory.roomPlan) {
             const sites = room.find(FIND_CONSTRUCTION_SITES);
             console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
             
-            const created = construction.forceConstructionSite(room, count);
+            // Force create sites from the room plan
+            const created = construction.createConstructionSitesFromPlan(room);
             
             const newSites = room.find(FIND_CONSTRUCTION_SITES);
             return `Force created ${created} construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
         } else {
-            const sites = room.find(FIND_CONSTRUCTION_SITES);
-            console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
+            // No room plan, try to generate one first
+            console.log(`Room ${roomName} has no room plan. Generating one...`);
+            const success = construction.generateRoomPlan(room);
             
-            construction.run(room, true);
+            if (!success) {
+                return `Failed to generate room plan for ${roomName}. Check console for errors.`;
+            }
+            
+            // Now create sites from the new plan
+            const sites = room.find(FIND_CONSTRUCTION_SITES);
+            const created = construction.createConstructionSitesFromPlan(room);
             
             const newSites = room.find(FIND_CONSTRUCTION_SITES);
-            return `Force created construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
+            return `Generated room plan and created ${created} construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
         }
     },
     
