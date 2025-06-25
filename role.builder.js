@@ -1121,7 +1121,6 @@ const roleBuilder = {
                         priority: priority,
                         time: Game.time
                     };
-                }
                     
                     // Prioritize nearly complete structures
                     const progressPercent = target.progress / target.progressTotal;
