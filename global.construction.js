@@ -89,6 +89,26 @@ module.exports = {
         }
     },
     
+    refreshRoomPlan: function(roomName) {
+        const room = Game.rooms[roomName];
+        if (!room) return `No visibility in room ${roomName}`;
+        
+        if (!room.controller || !room.controller.my) return `You don't control room ${roomName}`;
+        
+        // Delete the existing plan to force a complete regeneration
+        delete room.memory.roomPlan;
+        
+        // Generate a new plan with the updated defensive structure logic
+        const success = construction.generateRoomPlan(room);
+        
+        if (success) {
+            construction.visualizeRoomPlan(room);
+            return `Successfully refreshed and visualized room plan for ${roomName} with updated defensive structures`;
+        } else {
+            return `Failed to refresh room plan for ${roomName}`;
+        }
+    },
+    
     visualizeRoomPlan: function(roomName, rcl = 0) {
         const room = Game.rooms[roomName];
         if (!room) return `No visibility in room ${roomName}`;

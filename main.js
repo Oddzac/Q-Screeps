@@ -72,6 +72,9 @@ global.checkBuilders = function() {
     return "Builder status check complete";
 };
 
+// Function to refresh room plans with updated defensive structures
+global.refreshRoomPlan = globalConstruction.refreshRoomPlan;
+
 // Special function for simulation rooms
 global.simConstruction = function() {
     for (const roomName in Game.rooms) {
