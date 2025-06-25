@@ -459,8 +459,27 @@ const roleHauler = {
                       Object.keys(s.store).some(r => r !== RESOURCE_ENERGY && s.store[r] > 0)
         });
         
-        // Combine in priority order: dropped > tombstones > containers
-        const allSources = [...droppedResources, ...tombstones, ...containers];
+        // Find mineral containers specifically
+        let mineralContainers = [];
+        if (creep.room.memory.minerals) {
+            for (const mineralId in creep.room.memory.minerals) {
+                const mineralMemory = creep.room.memory.minerals[mineralId];
+                if (mineralMemory.isActive) {
+                    const mineral = Game.getObjectById(mineralId);
+                    if (mineral) {
+                        // Find containers near this mineral
+                        const nearbyContainers = mineral.pos.findInRange(FIND_STRUCTURES, 1, {
+                            filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                                      Object.keys(s.store).some(r => r !== RESOURCE_ENERGY && s.store[r] > 0)
+                        });
+                        mineralContainers = [...mineralContainers, ...nearbyContainers];
+                    }
+                }
+            }
+        }
+        
+        // Combine in priority order: mineral containers > dropped > tombstones > other containers
+        const allSources = [...mineralContainers, ...droppedResources, ...tombstones, ...containers];
         if (allSources.length > 0) {
             return creep.pos.findClosestByRange(allSources);
         }

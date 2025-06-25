@@ -252,6 +252,36 @@ const roomManager = {
             }
         }
         
+        // Process minerals and extractors
+        if (room.controller && room.controller.level >= 6) {
+            // Initialize minerals memory if needed
+            if (!room.memory.minerals) {
+                room.memory.minerals = {};
+            }
+            
+            // Find minerals in the room
+            const minerals = room.find(FIND_MINERALS);
+            
+            for (const mineral of minerals) {
+                // Initialize mineral data if not exists
+                if (!room.memory.minerals[mineral.id]) {
+                    room.memory.minerals[mineral.id] = {
+                        pos: {x: mineral.pos.x, y: mineral.pos.y},
+                        mineralType: mineral.mineralType,
+                        assignedHarvesters: 0
+                    };
+                }
+                
+                // Check if extractor exists
+                const extractor = mineral.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_EXTRACTOR);
+                room.memory.minerals[mineral.id].hasExtractor = !!extractor;
+                
+                // Check if mineral is ready for harvesting
+                const isActive = mineral.mineralAmount > 0 && extractor && !mineral.ticksToRegeneration;
+                room.memory.minerals[mineral.id].isActive = isActive;
+            }
+        }
+        
         // Batch find operations to reduce CPU usage - use cached find
         const structures = utils.cachedFind(room, FIND_STRUCTURES, {}, 20);
         
@@ -366,7 +396,7 @@ const roomManager = {
     /**
      * Get the best source for a harvester to mine
      * @param {Room} room - The room to check
-     * @returns {Source|null} - The best source or null if none available
+     * @returns {Source|Mineral|null} - The best source or null if none available
      */
     getBestSource: function(room) {
         // Safety check for room memory
@@ -376,6 +406,28 @@ const roomManager = {
         
         // First, verify and clean up source assignments
         this.validateSourceAssignments(room);
+        
+        // Check for active minerals with extractors at RCL 6+
+        if (room.controller && room.controller.level >= 6 && room.memory.minerals) {
+            for (const mineralId in room.memory.minerals) {
+                const mineralMemory = room.memory.minerals[mineralId];
+                
+                // Skip minerals that are not active or already have a harvester
+                if (!mineralMemory.isActive || mineralMemory.assignedHarvesters > 0) continue;
+                
+                // Get the actual mineral object
+                const mineral = Game.getObjectById(mineralId);
+                if (!mineral) {
+                    delete room.memory.minerals[mineralId];
+                    continue;
+                }
+                
+                // Assign harvester to this mineral
+                console.log(`Assigning harvester to mineral ${mineralId} (${mineral.mineralType}) in room ${room.name}`);
+                room.memory.minerals[mineralId].assignedHarvesters = 1;
+                return mineral;
+            }
+        }
         
         // Find source with the lowest harvester-to-capacity ratio
         let bestSourceId = null;
@@ -461,7 +513,14 @@ const roomManager = {
             actualAssignments[sourceId] = 0;
         }
         
-        // Count harvesters by their assigned source
+        // Initialize counts for each mineral
+        if (room.memory.minerals) {
+            for (const mineralId in room.memory.minerals) {
+                actualAssignments[mineralId] = 0;
+            }
+        }
+        
+        // Count harvesters by their assigned source or mineral
         for (const name in Game.creeps) {
             const creep = Game.creeps[name];
             if (creep.memory.role === 'harvester' && creep.memory.sourceId && 
@@ -484,6 +543,19 @@ const roomManager = {
             }
         }
         
+        // Update mineral assignments in memory
+        if (room.memory.minerals) {
+            for (const mineralId in room.memory.minerals) {
+                const remembered = room.memory.minerals[mineralId].assignedHarvesters || 0;
+                const actual = actualAssignments[mineralId] || 0;
+                
+                if (remembered !== actual) {
+                    room.memory.minerals[mineralId].assignedHarvesters = actual;
+                    correctionsMade = true;
+                }
+            }
+        }
+        
         // Log if corrections were made
         if (correctionsMade) {
             console.log(`Corrected harvester assignments in room ${room.name}`);
@@ -492,13 +564,16 @@ const roomManager = {
     
     /**
      * Release a source assignment when a harvester dies or switches sources
-     * @param {string} sourceId - ID of the source
+     * @param {string} sourceId - ID of the source or mineral
      * @param {string} roomName - Name of the room
      * @param {boolean} logRelease - Whether to log the release (default: false)
      */
     releaseSource: function(sourceId, roomName, logRelease = false) {
         const room = Game.rooms[roomName];
-        if (room && room.memory.sources && room.memory.sources[sourceId]) {
+        if (!room) return;
+        
+        // Check if it's a source
+        if (room.memory.sources && room.memory.sources[sourceId]) {
             const oldCount = room.memory.sources[sourceId].assignedHarvesters || 0;
             room.memory.sources[sourceId].assignedHarvesters = 
                 Math.max(0, oldCount - 1);
@@ -509,6 +584,22 @@ const roomManager = {
                 const energyInfo = source ? `${source.energy}/${source.energyCapacity} energy` : 'unknown energy';
                 helpers.logError(`source_release_${sourceId}`, `Released harvester from source ${sourceId} in room ${roomName} ` +
                             `(${room.memory.sources[sourceId].assignedHarvesters}/${room.memory.sources[sourceId].availableSpots} harvesters, ${energyInfo})`, 100);
+            }
+            return;
+        }
+        
+        // Check if it's a mineral
+        if (room.memory.minerals && room.memory.minerals[sourceId]) {
+            const oldCount = room.memory.minerals[sourceId].assignedHarvesters || 0;
+            room.memory.minerals[sourceId].assignedHarvesters = 
+                Math.max(0, oldCount - 1);
+                
+            // Log release if requested or periodically
+            if (logRelease || (Game.time % 100 === 0 && oldCount > 0)) {
+                const mineral = Game.getObjectById(sourceId);
+                const mineralInfo = mineral ? `${mineral.mineralAmount} ${mineral.mineralType}` : 'unknown mineral';
+                helpers.logError(`mineral_release_${sourceId}`, `Released harvester from mineral ${sourceId} in room ${roomName} ` +
+                            `(${mineralInfo})`, 100);
             }
         }
     },
@@ -782,6 +873,16 @@ const roomManager = {
         const rcl = room.controller.level;
         const sourceCount = Object.keys(room.memory.sources || {}).length || 1;
         
+        // Count active minerals with extractors
+        let activeMineralCount = 0;
+        if (rcl >= 6 && room.memory.minerals) {
+            for (const mineralId in room.memory.minerals) {
+                if (room.memory.minerals[mineralId].isActive) {
+                    activeMineralCount++;
+                }
+            }
+        }
+        
         // Count important structures
         const containers = room.find(FIND_STRUCTURES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER
@@ -837,7 +938,8 @@ const roomManager = {
         // Calculate requirements in priority order: Harvester -> Hauler -> Builder -> Upgrader
         
         // 1. Harvesters: Calculate based on energy capacity and harvesting efficiency
-        const harvesterCount = this.calculateOptimalHarvesters(room, sourceCount);
+        // Add one harvester per active mineral
+        const harvesterCount = this.calculateOptimalHarvesters(room, sourceCount) + activeMineralCount;
         
         // 2. Haulers: Based on energy production and infrastructure needs
         const haulerBase = Math.ceil(energyPerTick / 50);

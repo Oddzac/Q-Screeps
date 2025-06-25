@@ -119,14 +119,17 @@ const roleHarvester = {
             }
         }
         
-        // Get the assigned source
+        // Get the assigned source or mineral
         const source = Game.getObjectById(creep.memory.sourceId);
         if (!source) {
             creep.memory.sourceId = null;
             return;
         }
         
-        // Cache container near source
+        // Check if this is a mineral
+        const isMineral = source.mineralType !== undefined;
+        
+        // Cache container near source/mineral
         if (!creep.memory.containerId && creep.store.getFreeCapacity() === 0) {
             const containers = source.pos.findInRange(FIND_STRUCTURES, 1, {
                 filter: s => s.structureType === STRUCTURE_CONTAINER
@@ -204,8 +207,29 @@ const roleHarvester = {
             movementManager.checkAndGiveWay(creep);
         }
         
-        // Move to source and harvest
-        const harvestResult = creep.harvest(source);
+        // Move to source/mineral and harvest
+        let harvestResult;
+        if (isMineral) {
+            // Check if extractor exists
+            const extractor = source.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_EXTRACTOR);
+            if (!extractor) {
+                // No extractor, can't harvest
+                if (Game.time % 50 === 0) {
+                    creep.say('⚠️ No extractor');
+                }
+                return;
+            }
+            
+            // Harvest mineral
+            harvestResult = creep.harvest(source);
+            if (harvestResult === OK) {
+                creep.say('⛏️' + source.mineralType);
+            }
+        } else {
+            // Harvest energy source
+            harvestResult = creep.harvest(source);
+        }
+        
         if (harvestResult === ERR_NOT_IN_RANGE) {
             // Check if path to source is safe
             if (creep.memory.sourcePos) {
