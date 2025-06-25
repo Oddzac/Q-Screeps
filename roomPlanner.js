@@ -56,6 +56,7 @@ const roomPlanner = {
         structures[STRUCTURE_LINK] = rcl >= 5 ? this.planLinks(room, anchor, rcl, terrain) : [];
         structures[STRUCTURE_TERMINAL] = rcl >= 6 ? this.planTerminal(room, anchor, terrain) : [];
         structures[STRUCTURE_LAB] = rcl >= 6 ? this.planLabs(room, anchor, rcl, terrain) : [];
+        structures[STRUCTURE_EXTRACTOR] = rcl >= 6 ? this.planExtractors(room) : [];
         structures[STRUCTURE_FACTORY] = rcl >= 7 ? this.planFactory(room, anchor, terrain) : [];
         structures[STRUCTURE_OBSERVER] = rcl >= 8 ? this.planObserver(room, anchor, terrain) : [];
         structures[STRUCTURE_POWER_SPAWN] = rcl >= 8 ? this.planPowerSpawn(room, anchor, terrain) : [];
@@ -323,6 +324,23 @@ const roomPlanner = {
             }
         }
         
+        // Create roads to minerals (for RCL 6+ when extractors become available)
+        if (rcl >= 6) {
+            const minerals = room.find(FIND_MINERALS);
+            for (const mineral of minerals) {
+                const path = this.findPath(room, anchor, mineral.pos, terrain);
+                for (const step of path) {
+                    // Skip the mineral position itself
+                    if (step.x === mineral.pos.x && step.y === mineral.pos.y) continue;
+                    
+                    // Add road position if not already added
+                    if (!roads.some(r => r.x === step.x && r.y === step.y)) {
+                        roads.push({x: step.x, y: step.y});
+                    }
+                }
+            }
+        }
+        
         // Create roads around spawn and extensions
         if (rcl >= 3) {
             // Add roads around spawn
@@ -432,6 +450,17 @@ const roomPlanner = {
             }
         }
         
+        // Place containers near minerals for RCL 6+
+        if (rcl >= 6) {
+            const minerals = room.find(FIND_MINERALS);
+            for (const mineral of minerals) {
+                const pos = this.findMineralContainerPosition(room, mineral, terrain);
+                if (pos) {
+                    containers.push(pos);
+                }
+            }
+        }
+        
         return containers;
     },
     
@@ -522,6 +551,54 @@ const roomPlanner = {
                     }
                 }
                 
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = {x, y};
+                }
+            }
+        }
+        
+        return bestPos;
+    },
+    
+    /**
+     * Find position for a container near a mineral
+     */
+    findMineralContainerPosition: function(room, mineral, terrain) {
+        if (!mineral) return null;
+        
+        let bestPos = null;
+        let bestScore = -1;
+        
+        // Check positions around the mineral
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                // Skip the mineral position itself
+                if (dx === 0 && dy === 0) continue;
+                
+                const x = mineral.pos.x + dx;
+                const y = mineral.pos.y + dy;
+                
+                // Skip if out of bounds or on a wall
+                if (x <= 0 || y <= 0 || x >= 49 || y >= 49 || 
+                    terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    continue;
+                }
+                
+                // Calculate score based on adjacent walkable tiles
+                let score = 0;
+                for (let nx = -1; nx <= 1; nx++) {
+                    for (let ny = -1; ny <= 1; ny++) {
+                        const ax = x + nx;
+                        const ay = y + ny;
+                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
+                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
+                            score++;
+                        }
+                    }
+                }
+                
+                // Higher score means more accessible position
                 if (score > bestScore) {
                     bestScore = score;
                     bestPos = {x, y};
@@ -768,6 +845,23 @@ const roomPlanner = {
     },
     
     /**
+     * Plan extractor positions on minerals
+     */
+    planExtractors: function(room) {
+        const extractors = [];
+        
+        // Find all minerals in the room
+        const minerals = room.find(FIND_MINERALS);
+        
+        // Extractors must be placed directly on minerals
+        for (const mineral of minerals) {
+            extractors.push({x: mineral.pos.x, y: mineral.pos.y});
+        }
+        
+        return extractors;
+    },
+    
+    /**
      * Find a buildable position near a reference point
      */
     findBuildablePosition: function(room, refPos, minRange, maxRange, terrain, existingPositions = []) {
@@ -953,6 +1047,19 @@ const roomPlanner = {
             
             for (const pos of rclMaxPlan.structures[structureType]) {
                 protectedPositions.add(`${pos.x},${pos.y}`);
+            }
+        }
+        
+        // Add mineral positions to protected list
+        const minerals = room.find(FIND_MINERALS);
+        for (const mineral of minerals) {
+            // Add the mineral position itself (for the extractor)
+            protectedPositions.add(`${mineral.pos.x},${mineral.pos.y}`);
+            
+            // Also find and add the container position near the mineral
+            const containerPos = this.findMineralContainerPosition(room, mineral, terrain);
+            if (containerPos) {
+                protectedPositions.add(`${containerPos.x},${containerPos.y}`);
             }
         }
         
