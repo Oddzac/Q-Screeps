@@ -222,10 +222,36 @@ const errorHandler = function(error) {
     };
 };
 
+// Global function to wrap a module with performance monitoring
+global.wrapWithPerformance = function(moduleName, moduleObj) {
+    const performanceMonitor = require('performanceMonitor');
+    const wrapped = {};
+    
+    for (const key in moduleObj) {
+        if (typeof moduleObj[key] === 'function') {
+            wrapped[key] = function(...args) {
+                return performanceMonitor.trackFunction(
+                    `${moduleName}.${key}`, 
+                    moduleObj[key], 
+                    moduleObj, 
+                    ...args
+                );
+            };
+        } else {
+            wrapped[key] = moduleObj[key];
+        }
+    }
+    
+    return wrapped;
+};
+
 // Initialize CPU history tracking if not already done
 if (!global.cpuHistory) {
     global.cpuHistory = Array(10).fill(0.5); // Initialize with reasonable values
 }
+
+// Import performance monitor
+const performanceMonitor = require('performanceMonitor');
 
 module.exports.loop = function() {
     try {
@@ -523,6 +549,9 @@ module.exports.loop = function() {
     const totalCpuUsed = Game.cpu.getUsed() - cpuStart;
     global.stats.cpu.total += totalCpuUsed; // Changed from = to += to accumulate
     global.stats.cpu.ticks++;
+    
+    // Track performance
+    performanceMonitor.trackOverall(totalCpuUsed);
     
     // Track CPU usage with memory manager
     memoryManager.trackCpuUsage();

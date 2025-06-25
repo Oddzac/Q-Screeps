@@ -196,20 +196,57 @@ const defenseManager = {
      * @returns {boolean} - True if action taken
      */
     towerAttack: function(tower) {
-        const hostiles = tower.room.find(FIND_HOSTILE_CREEPS, {
-            filter: c => c.owner.username !== 'Source Keeper'
-        });
+        // Use cached hostiles from room memory if available to save CPU
+        let hostiles;
+        if (tower.room.memory.defense && tower.room.memory.defense.hostileCache && 
+            Game.time - tower.room.memory.defense.hostileCacheTime < 3) {
+            hostiles = tower.room.memory.defense.hostileCache.map(id => Game.getObjectById(id))
+                .filter(c => c !== null);
+        } else {
+            hostiles = tower.room.find(FIND_HOSTILE_CREEPS, {
+                filter: c => c.owner.username !== 'Source Keeper'
+            });
+            
+            // Cache the results
+            if (!tower.room.memory.defense) tower.room.memory.defense = {};
+            tower.room.memory.defense.hostileCache = hostiles.map(c => c.id);
+            tower.room.memory.defense.hostileCacheTime = Game.time;
+        }
         
         if (hostiles.length === 0) return false;
         
-        // Prioritize aggressive hostiles
-        const aggressive = hostiles.filter(c => 
+        // Prioritize targets by threat level and health
+        const healers = hostiles.filter(c => c.body.some(part => part.type === HEAL));
+        const attackers = hostiles.filter(c => 
             c.body.some(part => part.type === ATTACK || part.type === RANGED_ATTACK)
         );
         
-        const target = aggressive.length > 0 ? 
-            tower.pos.findClosestByRange(aggressive) : 
-            tower.pos.findClosestByRange(hostiles);
+        let target;
+        
+        // First priority: Low health healers
+        const weakHealers = healers.filter(c => c.hits < c.hitsMax * 0.5);
+        if (weakHealers.length > 0) {
+            target = tower.pos.findClosestByRange(weakHealers);
+        }
+        // Second priority: Low health attackers
+        else if (!target) {
+            const weakAttackers = attackers.filter(c => c.hits < c.hitsMax * 0.5);
+            if (weakAttackers.length > 0) {
+                target = tower.pos.findClosestByRange(weakAttackers);
+            }
+        }
+        // Third priority: Healers
+        else if (!target && healers.length > 0) {
+            target = tower.pos.findClosestByRange(healers);
+        }
+        // Fourth priority: Attackers
+        else if (!target && attackers.length > 0) {
+            target = tower.pos.findClosestByRange(attackers);
+        }
+        // Last priority: Any hostile
+        else {
+            target = tower.pos.findClosestByRange(hostiles);
+        }
             
         tower.attack(target);
         return true;
@@ -221,8 +258,25 @@ const defenseManager = {
      * @returns {boolean} - True if action taken
      */
     towerRepair: function(tower) {
+        // Only repair if tower has sufficient energy (>60%)
+        if (tower.store[RESOURCE_ENERGY] < tower.store.getCapacity(RESOURCE_ENERGY) * 0.6) return false;
+        
         // Use cached repair targets from room memory
         if (tower.room.memory.repairTargets && tower.room.memory.repairTargets.length > 0) {
+            // Prioritize critical structures first
+            const criticalTypes = [STRUCTURE_SPAWN, STRUCTURE_TOWER, STRUCTURE_STORAGE];
+            
+            // First pass: check critical structures
+            for (const id of tower.room.memory.repairTargets) {
+                const structure = Game.getObjectById(id);
+                if (structure && criticalTypes.includes(structure.structureType) && 
+                    structure.hits < structure.hitsMax * 0.5) {
+                    tower.repair(structure);
+                    return true;
+                }
+            }
+            
+            // Second pass: check any damaged structure
             for (const id of tower.room.memory.repairTargets) {
                 const structure = Game.getObjectById(id);
                 if (structure && structure.hits < structure.hitsMax * 0.4) {

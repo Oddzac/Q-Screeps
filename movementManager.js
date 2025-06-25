@@ -91,6 +91,20 @@ const movementManager = {
      * @param {Creep} creep - The creep to check
      * @returns {boolean} - True if the creep moved aside
      */
+    /**
+     * Clean the path cache periodically
+     */
+    cleanCache: function() {
+        const currentTick = Game.time;
+        const maxAge = 100; // Cache entries older than this will be removed
+        
+        for (const key in this.pathCache) {
+            if (this.pathCache[key].time + maxAge < currentTick) {
+                delete this.pathCache[key];
+            }
+        }
+    },
+    
     checkAndGiveWay: function(creep) {
         // Don't move if fatigued or already moved this tick
         if (creep.fatigue > 0 || creep._moved) return false;

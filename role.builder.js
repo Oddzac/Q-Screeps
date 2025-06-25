@@ -73,6 +73,34 @@ const roleBuilder = {
                 if (creep.memory.waitStartTime && Game.time - creep.memory.waitStartTime < 30) {
                     // Just wait in place
                     creep.say('⏳' + (30 - (Game.time - creep.memory.waitStartTime)));
+                    
+                    // Periodically check for available energy in containers/storage while waiting
+                    if (Game.time % 5 === 0) {
+                        const storage = creep.room.storage;
+                        if (storage && storage.store[RESOURCE_ENERGY] > 200) {
+                            // Skip waiting if storage has plenty of energy
+                            delete creep.memory.waitStartTime;
+                            creep.memory.harvestingStarted = true;
+                            creep.say('🔄📦');
+                            this.getEnergy(creep);
+                            return;
+                        }
+                        
+                        // Check for containers with significant energy
+                        const containers = creep.room.find(FIND_STRUCTURES, {
+                            filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                                      s.store[RESOURCE_ENERGY] > 200
+                        });
+                        
+                        if (containers.length > 0) {
+                            // Skip waiting if containers have plenty of energy
+                            delete creep.memory.waitStartTime;
+                            creep.memory.harvestingStarted = true;
+                            creep.say('🔄📦');
+                            this.getEnergy(creep);
+                            return;
+                        }
+                    }
                 } else {
                     // Clear wait timer and proceed with harvesting
                     delete creep.memory.waitStartTime;
@@ -760,6 +788,34 @@ const roleBuilder = {
      * @param {Creep} creep - The creep to get energy for
      */
     getEnergy: function(creep) {
+        // Check if we have an energy request and if it's assigned to a hauler
+        if (creep.room.memory.energyRequests && 
+            creep.room.memory.energyRequests[creep.id] && 
+            creep.room.memory.energyRequests[creep.id].assignedHaulerId) {
+            
+            // A hauler is coming to deliver energy, wait for it
+            const request = creep.room.memory.energyRequests[creep.id];
+            const hauler = Game.getObjectById(request.assignedHaulerId);
+            
+            // If hauler exists and is nearby, just wait
+            if (hauler && creep.pos.getRangeTo(hauler) <= 5) {
+                creep.say('⏳🚚');
+                return;
+            }
+            
+            // If hauler doesn't exist or is too far away, check how long we've been waiting
+            const waitTime = Game.time - request.timestamp;
+            if (waitTime > 30) {
+                // We've waited too long, clear the request and get energy ourselves
+                delete creep.memory.waitStartTime;
+                creep.memory.harvestingStarted = true;
+            } else {
+                // Still waiting for hauler
+                creep.say('⏳' + (30 - waitTime));
+                return;
+            }
+        }
+        
         // Use cached energy source if available
         let source = creep.memory.energySourceId ? Game.getObjectById(creep.memory.energySourceId) : null;
         
@@ -803,8 +859,11 @@ const roleBuilder = {
         const roomManager = require('roomManager');
         let source = null;
         
+        // Search more frequently if we're harvesting from a source
+        const searchInterval = creep.memory.energySourceType === 'source' ? 5 : 10;
+        
         // Only search for new sources periodically to save CPU
-        if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > 10) {
+        if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > searchInterval) {
             creep.memory.lastSourceSearch = Game.time;
             
             // Priority 1: Storage (if it has enough energy)
@@ -1023,6 +1082,13 @@ const roleBuilder = {
      * @returns {number} - Priority score (lower is higher priority)
      */
     calculateRequestPriority: function(creep) {
+        // Use cached priority if available and not too old
+        const cacheKey = `builder_priority_${creep.id}_time_${Game.time}`;
+        if (global._builderPriorityCache && global._builderPriorityCache[creep.id] && 
+            Game.time - global._builderPriorityCache[creep.id].time < 10) {
+            return global._builderPriorityCache[creep.id].priority;
+        }
+        
         let priority = 50; // Base priority
         
         // Give repairers higher base priority
@@ -1048,6 +1114,14 @@ const roleBuilder = {
                     } else if (target.structureType === STRUCTURE_ROAD) {
                         priority -= 10;
                     }
+                    
+                    // Cache the result
+                    if (!global._builderPriorityCache) global._builderPriorityCache = {};
+                    global._builderPriorityCache[creep.id] = {
+                        priority: priority,
+                        time: Game.time
+                    };
+                }
                     
                     // Prioritize nearly complete structures
                     const progressPercent = target.progress / target.progressTotal;
@@ -1246,6 +1320,39 @@ const roleBuilder = {
 
     
     harvestEnergySource: function(creep, source) {
+        // Periodically check for available energy in containers/storage while harvesting
+        if (creep.memory.harvestingStarted && creep.memory.energySourceType === 'source' && 
+            Game.time % 10 === 0) {
+            // Check for better energy sources
+            const storage = creep.room.storage;
+            if (storage && storage.store[RESOURCE_ENERGY] > 100) {
+                delete creep.memory.energySourceId;
+                delete creep.memory.sourcePos;
+                delete creep.memory.energySourceType;
+                creep.memory.lastSourceSearch = 0;
+                creep.say('🔄📦');
+                return this.findEnergySource(creep);
+            }
+            
+            // Check for containers with energy
+            const containers = creep.room.find(FIND_STRUCTURES, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER && 
+                          s.store[RESOURCE_ENERGY] > 100
+            });
+            
+            if (containers.length > 0) {
+                const closestContainer = creep.pos.findClosestByRange(containers);
+                if (closestContainer) {
+                    delete creep.memory.energySourceId;
+                    delete creep.memory.sourcePos;
+                    delete creep.memory.energySourceType;
+                    creep.memory.lastSourceSearch = 0;
+                    creep.say('🔄📦');
+                    return this.findEnergySource(creep);
+                }
+            }
+        }
+        
         creep.memory.energySourceId = source.id;
         
         // Determine source type if not already set

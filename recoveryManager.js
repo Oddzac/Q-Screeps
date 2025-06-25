@@ -23,33 +23,36 @@ const recoveryManager = {
     update: function() {
         const currentBucket = Game.cpu.bucket;
         
-        // Track bucket history
-        this.bucketHistory.push(currentBucket);
-        if (this.bucketHistory.length > this.historyLength) {
-            this.bucketHistory.shift();
-        }
-        
-        // Check for continuous bucket drain
-        if (global.previousBucket !== undefined && currentBucket < global.previousBucket) {
-            this.drainCounter++;
-            
-            // Only enter recovery if bucket is continuously draining AND below 5000
-            if (this.drainCounter >= this.drainThreshold && currentBucket < 5000 && !this.isRecovering) {
-                this.startRecovery(currentBucket);
+        // Only update every other tick to save CPU
+        if (Game.time % 2 === 0) {
+            // Track bucket history
+            this.bucketHistory.push(currentBucket);
+            if (this.bucketHistory.length > this.historyLength) {
+                this.bucketHistory.shift();
             }
-        } else {
-            // Reset drain counter if bucket is stable or increasing
-            this.drainCounter = 0;
+            
+            // Check for continuous bucket drain
+            if (global.previousBucket !== undefined && currentBucket < global.previousBucket) {
+                this.drainCounter++;
+                
+                // Only enter recovery if bucket is continuously draining AND below 5000
+                if (this.drainCounter >= this.drainThreshold && currentBucket < 5000 && !this.isRecovering) {
+                    this.startRecovery(currentBucket);
+                }
+            } else {
+                // Reset drain counter if bucket is stable or increasing
+                this.drainCounter = 0;
+            }
+            
+            // Update recovery rate if in recovery mode
+            if (this.isRecovering) {
+                this.updateRecoveryRate();
+                this.checkRecoveryComplete();
+            }
         }
         
         // Store current bucket for next tick comparison
         global.previousBucket = currentBucket;
-        
-        // Update recovery rate if in recovery mode
-        if (this.isRecovering) {
-            this.updateRecoveryRate();
-            this.checkRecoveryComplete();
-        }
     },
     
     /**

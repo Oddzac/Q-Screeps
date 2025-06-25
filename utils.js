@@ -156,6 +156,23 @@ const utils = {
      * @param {Array} args - Arguments to pass to the function
      * @returns {Object} - Result and CPU usage
      */
+    // Cache for function results
+    cache: {},
+    
+    /**
+     * Clean the cache periodically
+     */
+    cleanCache: function() {
+        const currentTick = Game.time;
+        const maxAge = 100; // Cache entries older than this will be removed
+        
+        for (const key in this.cache) {
+            if (key.includes('_time_') && parseInt(key.split('_time_')[1]) + maxAge < currentTick) {
+                delete this.cache[key];
+            }
+        }
+    },
+    
     measureCPU: function(fn, context, ...args) {
         const start = Game.cpu.getUsed();
         const result = fn.apply(context || this, args);
@@ -395,10 +412,8 @@ const utils = {
                             })
                         };
                         
-                        // Log detailed error
-                        console.log(`ERROR in ${moduleName}.${key}: ${errorInfo.message}`);
-                        console.log(`Stack: ${errorInfo.stack}`);
-                        console.log(`Args: ${errorInfo.args.join(', ')}`);
+                        // Use logError to prevent log spam
+                        this.logError(`${moduleName}.${key}`, `${errorInfo.message}\nStack: ${errorInfo.stack}\nArgs: ${errorInfo.args.join(', ')}`, 20);
                         
                         // Store error for debugging
                         if (!global.errors) global.errors = [];
