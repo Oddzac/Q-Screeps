@@ -1,9 +1,10 @@
 /**
  * Room Planner - Handles comprehensive room layout planning across all RCL levels
+ * Uses a top-down approach: plan for RCL 8 first, then derive lower level plans
  */
 const roomPlanner = {
     /**
-     * Generate a complete room plan from RCL 1 through 8
+     * Generate a complete room plan from RCL 8 down to RCL 1
      * @param {Room} room - The room to plan
      * @returns {Object} - Complete room plan
      */
@@ -19,13 +20,16 @@ const roomPlanner = {
         const plan = {
             rcl: {},  // Plans by RCL level
             anchor: {x: spawn.pos.x, y: spawn.pos.y},
-            version: 1,
+            version: 2, // Increment version to indicate new planning approach
             timestamp: Game.time
         };
         
-        // Generate plans for each RCL level
-        for (let rcl = 1; rcl <= 8; rcl++) {
-            plan.rcl[rcl] = this.generateRCLPlan(room, spawn.pos, rcl, terrain);
+        // First generate the complete plan for RCL 8
+        plan.rcl[8] = this.generateRCLPlan(room, spawn.pos, 8, terrain);
+        
+        // Then derive plans for lower RCL levels from the RCL 8 plan
+        for (let rcl = 7; rcl >= 1; rcl--) {
+            plan.rcl[rcl] = this.deriveRCLPlan(room, plan.rcl[8], rcl, terrain);
         }
         
         return plan;
@@ -60,6 +64,77 @@ const roomPlanner = {
         return {
             structures: structures,
             maxStructures: this.getMaxStructures(rcl)
+        };
+    },
+    
+    /**
+     * Derive a plan for a lower RCL level from the RCL 8 plan
+     * @param {Room} room - The room
+     * @param {Object} rclMaxPlan - The RCL 8 plan to derive from
+     * @param {number} targetRcl - Target RCL level to derive for
+     * @param {RoomTerrain} terrain - Room terrain
+     * @returns {Object} - Plan for the target RCL level
+     */
+    deriveRCLPlan: function(room, rclMaxPlan, targetRcl, terrain) {
+        // Get maximum allowed structures for this RCL
+        const maxStructures = this.getMaxStructures(targetRcl);
+        const structures = {};
+        
+        // For each structure type in the RCL 8 plan
+        for (const structureType in rclMaxPlan.structures) {
+            // Get the maximum allowed count for this structure type at the target RCL
+            const maxAllowed = maxStructures[structureType] || 0;
+            
+            // If none allowed at this RCL, set to empty array
+            if (maxAllowed === 0) {
+                structures[structureType] = [];
+                continue;
+            }
+            
+            // Get the positions from the RCL 8 plan
+            const positions = rclMaxPlan.structures[structureType] || [];
+            
+            // Special handling for containers and links
+            if (structureType === STRUCTURE_CONTAINER) {
+                // At lower RCLs, we need containers where links would be at higher RCLs
+                if (targetRcl < 5) {
+                    // Get link positions from RCL 8 plan that should be containers at lower RCLs
+                    const linkPositions = rclMaxPlan.structures[STRUCTURE_LINK] || [];
+                    
+                    // Create a set of existing container positions to avoid duplicates
+                    const containerPositions = new Set(positions.map(pos => `${pos.x},${pos.y}`));
+                    
+                    // Add source link positions as containers for lower RCLs
+                    // Skip the first link (usually storage link) and second link (usually controller link)
+                    for (let i = 2; i < linkPositions.length && containerPositions.size < maxAllowed; i++) {
+                        const linkPos = linkPositions[i];
+                        const posKey = `${linkPos.x},${linkPos.y}`;
+                        
+                        if (!containerPositions.has(posKey)) {
+                            containerPositions.add(posKey);
+                            positions.push(linkPos);
+                        }
+                    }
+                    
+                    // Limit to max allowed
+                    structures[structureType] = positions.slice(0, maxAllowed);
+                } else {
+                    // For RCL 5+, use only the original container positions (not source containers)
+                    // Keep only the first 2 containers (usually controller and a buffer container)
+                    structures[structureType] = positions.slice(0, Math.min(2, maxAllowed));
+                }
+            } else if (structureType === STRUCTURE_LINK) {
+                // For links, prioritize storage link, then controller link, then source links
+                structures[structureType] = positions.slice(0, maxAllowed);
+            } else {
+                // For all other structures, just take the first N positions allowed at this RCL
+                structures[structureType] = positions.slice(0, maxAllowed);
+            }
+        }
+        
+        return {
+            structures: structures,
+            maxStructures: maxStructures
         };
     },
     
@@ -331,7 +406,13 @@ const roomPlanner = {
         // Find sources
         const sources = room.find(FIND_SOURCES);
         
-        // Place containers near sources
+        // Place container near controller at RCL 2+
+        const controllerPos = this.findControllerContainerPosition(room, terrain);
+        if (controllerPos) {
+            containers.push(controllerPos);
+        }
+        
+        // Place containers near sources (these will be replaced by links at higher RCLs)
         for (const source of sources) {
             const pos = this.findBestSourceContainerPosition(room, source, terrain);
             if (pos) {
@@ -339,11 +420,15 @@ const roomPlanner = {
             }
         }
         
-        // Place container near controller at RCL 2+
-        if (rcl >= 2) {
-            const controllerPos = this.findControllerContainerPosition(room, terrain);
-            if (controllerPos) {
-                containers.push(controllerPos);
+        // Add a buffer container near storage position for RCL 4+
+        if (rcl >= 4) {
+            const storagePositions = this.planStorage(room, anchor, terrain);
+            if (storagePositions.length > 0) {
+                const storagePos = storagePositions[0];
+                const bufferPos = this.findBuildablePosition(room, storagePos, 1, 2, terrain, containers);
+                if (bufferPos) {
+                    containers.push(bufferPos);
+                }
             }
         }
         
@@ -511,8 +596,9 @@ const roomPlanner = {
         if (maxLinks === 0) return links;
         
         // First link: near storage
-        if (room.storage) {
-            const storagePos = {x: room.storage.pos.x, y: room.storage.pos.y};
+        const storagePositions = this.planStorage(room, anchor, terrain);
+        if (storagePositions.length > 0) {
+            const storagePos = storagePositions[0];
             const storageLink = this.findBuildablePosition(room, storagePos, 1, 2, terrain);
             if (storageLink) {
                 links.push(storageLink);
@@ -527,21 +613,35 @@ const roomPlanner = {
         
         // Second link: near controller
         if (maxLinks >= 2) {
-            const controllerLink = this.findBuildablePosition(room, room.controller.pos, 2, 3, terrain, links);
-            if (controllerLink) {
-                links.push(controllerLink);
+            // Use the same position as the controller container
+            const controllerPos = this.findControllerContainerPosition(room, terrain);
+            if (controllerPos) {
+                links.push(controllerPos);
+            } else {
+                // Fallback if no container position found
+                const controllerLink = this.findBuildablePosition(room, room.controller.pos, 2, 3, terrain, links);
+                if (controllerLink) {
+                    links.push(controllerLink);
+                }
             }
         }
         
-        // Additional links: near sources
+        // Additional links: replace source containers
         if (maxLinks >= 3) {
             const sources = room.find(FIND_SOURCES);
             for (const source of sources) {
                 if (links.length >= maxLinks) break;
                 
-                const sourceLink = this.findBuildablePosition(room, source.pos, 1, 2, terrain, links);
-                if (sourceLink) {
-                    links.push(sourceLink);
+                // Use the same position as the source container
+                const containerPos = this.findBestSourceContainerPosition(room, source, terrain);
+                if (containerPos) {
+                    links.push(containerPos);
+                } else {
+                    // Fallback if no container position found
+                    const sourceLink = this.findBuildablePosition(room, source.pos, 1, 2, terrain, links);
+                    if (sourceLink) {
+                        links.push(sourceLink);
+                    }
                 }
             }
         }
@@ -754,7 +854,9 @@ const roomPlanner = {
             [STRUCTURE_FACTORY]: '#aa00ff',
             [STRUCTURE_OBSERVER]: '#00ffaa',
             [STRUCTURE_POWER_SPAWN]: '#aaff00',
-            [STRUCTURE_NUKER]: '#ff0055'
+            [STRUCTURE_NUKER]: '#ff0055',
+            'rampart': '#00ff00',
+            'wall': '#cccccc'
         };
         
         // Visualize anchor point
@@ -771,6 +873,31 @@ const roomPlanner = {
                 this.visualizeRCL(visual, plan.rcl[level], colors, opacity);
             }
             visual.text('Complete Room Plan (All RCLs)', 25, 2, {align: 'center', color: '#ffffff'});
+        }
+        
+        // Visualize defensive structures if available and showing RCL 8 or all RCLs
+        if (plan.defenses && (rcl === 0 || rcl === 8)) {
+            // Visualize ramparts
+            for (const pos of plan.defenses.ramparts) {
+                visual.rect(pos.x - 0.5, pos.y - 0.5, 1, 1, {
+                    fill: colors['rampart'],
+                    opacity: 0.3,
+                    stroke: colors['rampart'],
+                    strokeWidth: 0.1
+                });
+            }
+            
+            // Visualize walls
+            for (const pos of plan.defenses.walls) {
+                visual.rect(pos.x - 0.4, pos.y - 0.4, 0.8, 0.8, {
+                    fill: colors['wall'],
+                    opacity: 0.5
+                });
+            }
+            
+            // Add defense count to visualization
+            visual.text(`Defenses: ${plan.defenses.ramparts.length} ramparts, ${plan.defenses.walls.length} walls`, 
+                      25, 47, {align: 'center', color: '#ffffff'});
         }
         
         // Add legend
@@ -800,6 +927,111 @@ const roomPlanner = {
                 }
             }
         }
+    },
+    
+    /**
+     * Plan defensive structures based on the final room footprint
+     * @param {Room} room - The room to plan defenses for
+     * @param {Object} roomPlan - The complete room plan
+     * @returns {Object} - Defensive structure positions
+     */
+    planDefenses: function(room, roomPlan) {
+        if (!roomPlan || !roomPlan.rcl || !roomPlan.rcl[8]) return null;
+        
+        const terrain = room.getTerrain();
+        const rclMaxPlan = roomPlan.rcl[8];
+        const defenses = {
+            ramparts: [],
+            walls: []
+        };
+        
+        // Create a set of all structure positions to protect
+        const protectedPositions = new Set();
+        for (const structureType in rclMaxPlan.structures) {
+            // Skip roads for rampart protection
+            if (structureType === STRUCTURE_ROAD) continue;
+            
+            for (const pos of rclMaxPlan.structures[structureType]) {
+                protectedPositions.add(`${pos.x},${pos.y}`);
+            }
+        }
+        
+        // Add ramparts on all important structures
+        for (const posKey of protectedPositions) {
+            const [x, y] = posKey.split(',').map(Number);
+            defenses.ramparts.push({x, y});
+        }
+        
+        // Find the outer perimeter for walls
+        const roomBoundary = this.findRoomBoundary(room, protectedPositions, terrain);
+        defenses.walls = roomBoundary.walls;
+        defenses.ramparts = [...defenses.ramparts, ...roomBoundary.ramparts];
+        
+        return defenses;
+    },
+    
+    /**
+     * Find the room boundary for defensive structures
+     * @param {Room} room - The room
+     * @param {Set} protectedPositions - Set of positions to protect
+     * @param {RoomTerrain} terrain - Room terrain
+     * @returns {Object} - Wall and rampart positions
+     */
+    findRoomBoundary: function(room, protectedPositions, terrain) {
+        const walls = [];
+        const ramparts = [];
+        
+        // Create a grid representation of the room
+        const grid = Array(50).fill().map(() => Array(50).fill(0));
+        
+        // Mark protected positions as 1
+        for (const posKey of protectedPositions) {
+            const [x, y] = posKey.split(',').map(Number);
+            grid[y][x] = 1;
+        }
+        
+        // Mark terrain walls as -1
+        for (let y = 0; y < 50; y++) {
+            for (let x = 0; x < 50; x++) {
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    grid[y][x] = -1;
+                }
+            }
+        }
+        
+        // Find boundary positions (adjacent to protected positions but not protected themselves)
+        for (let y = 1; y < 49; y++) {
+            for (let x = 1; x < 49; x++) {
+                // Skip if this is a protected position or terrain wall
+                if (grid[y][x] !== 0) continue;
+                
+                // Check if adjacent to a protected position
+                let isAdjacent = false;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        
+                        if (grid[y + dy][x + dx] === 1) {
+                            isAdjacent = true;
+                            break;
+                        }
+                    }
+                    if (isAdjacent) break;
+                }
+                
+                // If adjacent to a protected position, add to boundary
+                if (isAdjacent) {
+                    // Use ramparts for exit tiles, walls for non-exit tiles
+                    if (x === 0 || x === 49 || y === 0 || y === 49) {
+                        ramparts.push({x, y});
+                    } else {
+                        walls.push({x, y});
+                    }
+                }
+            }
+        }
+        
+        return { walls, ramparts };
     }
 };
 

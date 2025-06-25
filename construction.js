@@ -273,6 +273,73 @@ const construction = {
             }
         }
         
+        // Handle defensive structures if we're at RCL 3 or higher
+        if (currentRCL >= 3 && plan.defenses && sitesCreated < maxSites) {
+            // At RCL 3-4, only protect towers and spawns with ramparts
+            if (currentRCL >= 3 && currentRCL < 5) {
+                const criticalStructures = new Set();
+                
+                // Add tower positions
+                for (const pos of rclPlan[STRUCTURE_TOWER] || []) {
+                    criticalStructures.add(`${pos.x},${pos.y}`);
+                }
+                
+                // Add spawn positions
+                for (const pos of rclPlan[STRUCTURE_SPAWN] || []) {
+                    criticalStructures.add(`${pos.x},${pos.y}`);
+                }
+                
+                // Create ramparts on these critical structures
+                for (const posKey of criticalStructures) {
+                    if (sitesCreated >= maxSites) break;
+                    
+                    const [x, y] = posKey.split(',').map(Number);
+                    const key = `${x},${y},${STRUCTURE_RAMPART}`;
+                    
+                    if (!existingStructures.has(key) && !existingSites.has(key)) {
+                        const result = room.createConstructionSite(x, y, STRUCTURE_RAMPART);
+                        if (result === OK) {
+                            sitesCreated++;
+                            existingSites.set(key, true);
+                        }
+                    }
+                }
+            } else if (currentRCL >= 5) {
+                // At RCL 5+, start building the full defensive perimeter
+                // Prioritize ramparts on structures, then perimeter ramparts, then walls
+                
+                // First, build ramparts on important structures
+                for (const pos of plan.defenses.ramparts) {
+                    if (sitesCreated >= maxSites) break;
+                    
+                    const key = `${pos.x},${pos.y},${STRUCTURE_RAMPART}`;
+                    if (!existingStructures.has(key) && !existingSites.has(key)) {
+                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_RAMPART);
+                        if (result === OK) {
+                            sitesCreated++;
+                            existingSites.set(key, true);
+                        }
+                    }
+                }
+                
+                // Then build walls if we still have capacity and at RCL 6+
+                if (currentRCL >= 6 && sitesCreated < maxSites) {
+                    for (const pos of plan.defenses.walls) {
+                        if (sitesCreated >= maxSites) break;
+                        
+                        const key = `${pos.x},${pos.y},${STRUCTURE_WALL}`;
+                        if (!existingStructures.has(key) && !existingSites.has(key)) {
+                            const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_WALL);
+                            if (result === OK) {
+                                sitesCreated++;
+                                existingSites.set(key, true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         return sitesCreated;
     },
     
@@ -474,6 +541,13 @@ const construction = {
             return false;
         }
         
+        // Plan defensive structures based on the final room footprint
+        const defenses = roomPlanner.planDefenses(room, plan);
+        if (defenses) {
+            plan.defenses = defenses;
+            console.log(`Planned ${defenses.ramparts.length} ramparts and ${defenses.walls.length} walls for ${room.name}`);
+        }
+        
         // Store the plan in room memory
         room.memory.roomPlan = plan;
         
@@ -485,7 +559,7 @@ const construction = {
         room.memory.construction.lastRCL = room.controller.level;
         room.memory.construction.lastUpdate = Game.time;
         
-        console.log(`Generated complete room plan for ${room.name} from RCL 1 to 8`);
+        console.log(`Generated complete room plan for ${room.name} from RCL 8 down to RCL 1`);
         return true;
     },
     
